@@ -6,7 +6,7 @@
 
 ## 🚀 两种用法，选一个
 
-### 🅰️ 有 AI agent 使用习惯（如 ZCode / Claude Code）—— 克隆仓库，导入定时任务
+### 🅰️ 如果有 AI agent，可以直接克隆仓库导入定时任务
 
 ```bash
 git clone https://github.com/Famalhaut04/canvas-weekly-hub.git
@@ -15,7 +15,7 @@ git clone https://github.com/Famalhaut04/canvas-weekly-hub.git
 按 **[部署指南](docs/部署指南.md)** 配置令牌，然后把每周定时任务导入你的 agent，之后每周五晚自动抓取并**用中文向你汇报**。
 功能最全：可同时更新本地看板、备份到你的私有仓库、生成单文件看板与 ICS 日历。
 
-### 🅱️ 没有 agent 使用习惯 —— 下载安装包，双击即用
+### 🅱️ 如若没有 AI agent，则可以直接下载软件包进行使用
 
 **👉 [下载 CityU-Canvas-Assistant-v1.1.0.exe](https://github.com/Famalhaut04/canvas-weekly-hub/releases/latest)**（Windows，约 12 MB，**无需安装 Python**）
 
