@@ -92,9 +92,11 @@
   .row .sub { font-size: .78rem; color: var(--muted); display: block; }
   .row .tail { flex: 0 0 auto; text-align: right; font-size: .78rem; color: var(--muted); }
   .pill { display: inline-block; border-radius: 999px; padding: 1px 8px; font-size: .72rem;
-          font-weight: 600; background: var(--chip); color: var(--brand); }
+          font-weight: 600; background: var(--chip); color: var(--brand); white-space: nowrap; }
   .pill.new { background: var(--far-bg); color: var(--far); }
   .pill.upd { background: var(--soon-bg); color: var(--soon); }
+  .pill.sub-ok { background: var(--far-bg); color: var(--far); }
+  .pill.sub-no { background: var(--urgent-bg); color: var(--urgent); font-weight: 700; }
   .pill.pts { background: var(--panel-2); color: var(--muted); border: 1px solid var(--line); }
   .due { display: inline-block; border-radius: 8px; padding: 2px 9px; font-size: .75rem;
          font-weight: 600; white-space: nowrap; }
@@ -168,7 +170,8 @@
   <div class="meta">
     <span id="updated">加载中…</span><i>·</i>
     <span id="range"></span><i>·</i>
-    <span id="tz-label">UTC+8</span>
+    <span id="tz-label">UTC+8</span><i>·</i>
+    <a id="ics-link" href="deadlines.ics" download title="导入手机日历，截止前 2 小时提醒">📅 截止日历</a>
   </div>
 </header>
 
@@ -237,6 +240,11 @@ const active = c => !!(c.new_assignments.length || c.upcoming.length || c.new_fi
 const score = c => c.new_assignments.length * 3 + c.upcoming.length * 3 + c.new_files.length + c.announcements.length;
 
 /* ================= 渲染片段 ================= */
+const subChip = a => a.graded
+  ? `<span class="pill sub-ok">已评分 ${a.score ?? "-"}</span>`
+  : a.submitted === true ? `<span class="pill sub-ok">已提交</span>`
+  : a.submitted === false ? `<span class="pill sub-no">未提交</span>` : "";
+
 function assignRow(a, showStatus) {
   const d = due(a.due_iso, a.due_at);
   const pts = a.points === null || a.points === undefined ? "" : `<span class="pill pts">${a.points} 分</span>`;
@@ -249,7 +257,7 @@ function assignRow(a, showStatus) {
       <a href="${esc(a.url)}" target="_blank" rel="noopener">${esc(a.name)}</a>
       <span class="sub">${esc(a.kind || "任务")}</span>
     </span>
-    ${pts}${st}
+    ${pts}${subChip(a)}${st}
     <span class="tail"><span class="due ${d.cls}">${esc(d.when)}${d.label ? `<span>${d.label}</span>` : ""}</span></span>
   </div>`;
 }
@@ -268,6 +276,10 @@ function fileCard(f, course) {
 
 function courseCard(c, open) {
   const block = [];
+  if (c.changes && c.changes.length)
+    block.push(`<h4>🔄 与上次相比的变化 <em>${c.changes.length}</em></h4>
+      <ul class="ann">${c.changes.map(ch => `<li><strong>${esc(ch.type)}</strong>：${esc(ch.name)}
+        <span class="atext">（${esc(ch.detail)}）</span></li>`).join("")}</ul>`);
   if (c.new_assignments.length)
     block.push(`<h4>📝 新作业 / 任务 <em>${c.new_assignments.length}</em></h4>
       ${c.new_assignments.map(a => assignRow(a, true)).join("")}`);
@@ -285,6 +297,7 @@ function courseCard(c, open) {
         <span class="atext">（${esc(a.created_at)}）${esc(a.summary)}…</span></li>`).join("")}</ul>`);
 
   const badges = [];
+  if (c.changes && c.changes.length) badges.push(`<span class="pill upd">${c.changes.length} 变化</span>`);
   if (c.new_assignments.length) badges.push(`<span class="pill new">${c.new_assignments.length} 新任务</span>`);
   if (c.upcoming.length) badges.push(`<span class="pill upd">${c.upcoming.length} 待办</span>`);
   if (c.new_files.length) badges.push(`<span class="pill">${c.new_files.length} 新资料</span>`);
@@ -369,6 +382,7 @@ function render() {
             <a href="${esc(a.url)}" target="_blank" rel="noopener">${esc(a.name)}</a>
             <span class="sub">${esc(a.course)}${a.points !== null && a.points !== undefined ? " · " + a.points + " 分" : ""}</span>
           </span>
+          ${subChip(a)}
           <span class="tail"><span class="due ${d.cls}">${esc(d.when)}${d.label ? `<span>${d.label}</span>` : ""}</span></span>
         </div>`;
       }).join("")
@@ -391,6 +405,7 @@ function render() {
             <a href="${esc(a.url)}" target="_blank" rel="noopener">${esc(a.name)}</a>
             <span class="sub">${esc(c.name)}${a.points !== null && a.points !== undefined ? " · " + a.points + " 分" : ""}</span>
           </span>
+          ${subChip(a)}
           <span class="tail"><span class="due ${d.cls}">${esc(d.when)}${d.label ? `<span>${d.label}</span>` : ""}</span></span>
         </div>`;
       }).join("")

@@ -14,3 +14,8 @@ diag*.html
 # 系统文件
 .DS_Store
 Thumbs.db
+
+# 本地生成的个人数据
+downloads/
+last_state.json
+deadlines.ics

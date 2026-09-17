@@ -10,5 +10,9 @@
     "repo_name": "learning-hub",
     "repo_dir": "D:/canvas/site-repo/learning-hub",
     "push_enabled": true
-  }
+  },
+  "token_expires_at": "",
+  "token_remind_days": 5,
+  "download_files": true,
+  "download_dir": "downloads"
 }

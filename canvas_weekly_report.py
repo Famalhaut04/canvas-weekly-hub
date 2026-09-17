@@ -20,8 +20,10 @@
 仅依赖 Python 标准库。token 未配置时生成提示报告并正常退出（退出码 2）。
 """
 
+import hashlib
 import json
 import re
+import shutil
 import subprocess
 import sys
 import urllib.error
@@ -121,6 +123,93 @@ def assign_kind(a):
     return "任务"
 
 
+# ---------------------------------------------------------------- 状态快照（增量 diff）
+
+def load_last_state():
+    try:
+        return json.loads((BASE_DIR / "last_state.json").read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def save_last_state(state):
+    state["saved_at"] = datetime.now(timezone.utc).isoformat()
+    (BASE_DIR / "last_state.json").write_text(
+        json.dumps(state, ensure_ascii=False, indent=1), encoding="utf-8")
+
+
+# ---------------------------------------------------------------- 课件下载
+
+def download_new_file(base, token, cid, fobj, dest_dir):
+    """下载单个新文件，返回本地路径；失败返回 None。已存在且大小一致时跳过。"""
+    fid = fobj.get("id")
+    if not fid:
+        return None
+    safe_name = re.sub(r'[\\/:*?"<>|]', "_", fobj.get("name", f"file_{fid}"))
+    dest = dest_dir / safe_name
+    try:
+        if fobj.get("size_bytes") and dest.exists() and dest.stat().st_size == fobj["size_bytes"]:
+            return str(dest)  # 与上次下载一致，跳过
+        meta = api_get_all(base, token, f"/courses/{cid}/files/{fid}")
+        url = (meta[0] if isinstance(meta, list) else meta).get("url")
+        if not url:
+            return None
+        req = urllib.request.Request(url)
+        with urllib.request.urlopen(req, timeout=180) as resp, open(dest, "wb") as out:
+            while True:
+                chunk = resp.read(65536)
+                if not chunk:
+                    break
+                out.write(chunk)
+        return str(dest)
+    except Exception as e:  # 下载失败不阻断整体流程
+        print(f"  [下载失败] {fobj.get('name')}: {e}", file=sys.stderr)
+        if dest.exists():
+            dest.unlink(missing_ok=True)
+        return None
+
+
+# ---------------------------------------------------------------- ICS 日历导出
+
+def ics_escape(s):
+    return (s or "").replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,").replace("\n", "\\n")
+
+
+def build_ics(week, path):
+    """把未来有截止时间的任务写成 ICS 日历文件，返回事件数量。"""
+    lines = ["BEGIN:VCALENDAR", "VERSION:2.0",
+             "PRODID:-//canvas-weekly-hub//deadline-export//CN",
+             "CALSCALE:GREGORIAN", "METHOD:PUBLISH"]
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    count = 0
+    for c in week["courses"]:
+        seen = set()
+        pool = c.get("upcoming", []) + c.get("new_assignments", [])
+        for a in pool:
+            dt = parse_ts(a.get("due_iso"))
+            if not dt or dt < datetime.now(timezone.utc):
+                continue
+            key = (a.get("url") or "") + "|" + a["name"]
+            if key in seen:
+                continue
+            seen.add(key)
+            uid = hashlib.md5(key.encode("utf-8")).hexdigest() + "@canvas-weekly-hub"
+            start = dt.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            end = (dt + timedelta(minutes=15)).astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            summary = ics_escape(f"[{c.get('code') or c['name']}] {a['name']}")
+            lines += ["BEGIN:VEVENT", f"UID:{uid}", f"DTSTAMP:{stamp}",
+                      f"DTSTART:{start}", f"DTEND:{end}",
+                      f"SUMMARY:{summary}",
+                      f"DESCRIPTION:{ics_escape(a.get('url', ''))}",
+                      "BEGIN:VALARM", "TRIGGER:-PT2H", "ACTION:DISPLAY",
+                      f"DESCRIPTION:{ics_escape(a['name'])}", "END:VALARM",
+                      "END:VEVENT"]
+            count += 1
+    lines.append("END:VCALENDAR")
+    path.write_text("\r\n".join(lines) + "\r\n", encoding="utf-8")
+    return count
+
+
 def file_kind(name):
     n = (name or "").lower()
     if n.endswith((".ppt", ".pptx", ".key")):
@@ -148,6 +237,9 @@ def fetch_week_data(cfg):
     lookback_days = int(cfg.get("lookback_days", 7))
     upcoming_days = int(cfg.get("upcoming_days", 7))
     term_filter = (cfg.get("term_filter") or "").strip()
+    prev_state = load_last_state()
+    new_state = {"assignments": {}}
+    stats = {"downloaded": 0, "total": 0}
 
     now = datetime.now(timezone.utc)
     lookback_start = now - timedelta(days=lookback_days)
@@ -170,15 +262,39 @@ def fetch_week_data(cfg):
 
         # ---- 作业 ----
         try:
-            assignments = api_get_all(base, token, f"/courses/{cid}/assignments", {"order_by": "due_at"})
+            assignments = api_get_all(base, token, f"/courses/{cid}/assignments",
+                                      {"order_by": "due_at", "include[]": ["submission"]})
         except RuntimeError:
             assignments = []
-        new_assignments, upcoming = [], []
+        new_assignments, upcoming, changes = [], [], []
+        course_state = {}
+        prev_course = prev_state.get("assignments", {}).get(str(cid), {})
         for a in assignments:
             created, updated, due = parse_ts(a.get("created_at")), parse_ts(a.get("updated_at")), parse_ts(a.get("due_at"))
+            sub = a.get("submission") or {}
+            wf = sub.get("workflow_state")
+            submitted = wf in ("submitted", "graded", "pending_review")
+            graded = wf == "graded"
             is_new = bool(created and created >= lookback_start)
             is_updated = (not is_new) and bool(updated and updated >= lookback_start)
-            if not (is_new or is_updated or (due and now <= due <= upcoming_end)):
+
+            # 记录当前状态，与上次快照对比出"改期/新评分/移除"
+            aid = str(a.get("id"))
+            course_state[aid] = {"name": a.get("name", ""),
+                                 "due_iso": due.isoformat() if due else None,
+                                 "wf": wf}
+            prev = prev_course.get(aid)
+            if prev:
+                aname = a.get("name", "未命名任务")
+                if prev.get("due_iso") and prev["due_iso"] != course_state[aid]["due_iso"]:
+                    changes.append({"type": "改期", "name": aname,
+                                    "detail": f"截止时间 {fmt_hk(parse_ts(prev['due_iso']))} → {fmt_hk(due)}"})
+                if prev.get("wf") != "graded" and graded:
+                    changes.append({"type": "新评分", "name": aname,
+                                    "detail": f"已评分：{sub.get('score', '-')} / {a.get('points_possible', '-')} 分"})
+
+            is_due_soon = bool(due and now <= due <= upcoming_end)
+            if not (is_new or is_updated or is_due_soon):
                 continue
             item = {
                 "name": a.get("name", "未命名任务"),
@@ -188,11 +304,20 @@ def fetch_week_data(cfg):
                 "points": a.get("points_possible"),
                 "url": a.get("html_url", ""),
                 "status": "新布置" if is_new else ("有更新" if is_updated else None),
+                "submitted": submitted,
+                "graded": graded,
+                "score": sub.get("score"),
             }
             if is_new or is_updated:
                 new_assignments.append(item)
-            if due and now <= due <= upcoming_end:
+            if is_due_soon:
                 upcoming.append(dict(item))
+        # 上次见过、这次消失的作业 = 已删除或被老师隐藏
+        for aid, prev in prev_course.items():
+            if aid not in course_state:
+                changes.append({"type": "移除", "name": prev.get("name") or aid,
+                                "detail": "作业已从课程中删除或被隐藏"})
+        new_state["assignments"][str(cid)] = course_state
 
         # ---- 新文件 ----
         try:
@@ -209,6 +334,7 @@ def fetch_week_data(cfg):
             changed = bool(updated and (updated - created).total_seconds() > 3600)
             fname = f_.get("display_name") or f_.get("filename") or "未命名文件"
             new_files.append({
+                "id": f_.get("id"),
                 "name": fname,
                 "kind": file_kind(fname),
                 "created_at": fmt_hk(created),
@@ -219,6 +345,19 @@ def fetch_week_data(cfg):
                 # Canvas 文件本身没有可公开访问的直链，统一指向课程「文件」页，浏览器已登录即可打开
                 "url": files_page,
             })
+        # 新资料自动下载到本地复习目录（可在配置中关闭）
+        if cfg.get("download_files", True) and new_files:
+            dl_dir = Path(cfg.get("download_dir") or "downloads")
+            if not dl_dir.is_absolute():
+                dl_dir = BASE_DIR / dl_dir
+            dl_dir = dl_dir / re.sub(r'[\\/:*?"<>|]', "_", code or name)
+            dl_dir.mkdir(parents=True, exist_ok=True)
+            for f_ in new_files:
+                stats["total"] += 1
+                saved = download_new_file(base, token, cid, f_, dl_dir)
+                f_["saved"] = bool(saved)
+                if saved:
+                    stats["downloaded"] += 1
 
         # ---- 公告 ----
         try:
@@ -245,24 +384,41 @@ def fetch_week_data(cfg):
             "upcoming": upcoming,
             "new_files": new_files,
             "announcements": new_anns,
+            "changes": changes,
         })
 
-    return {
+    week = {
         "date": now.astimezone(HK_TZ).strftime("%Y-%m-%d"),
         "generated_at": now.astimezone(HK_TZ).strftime("%Y-%m-%d %H:%M"),
         "range": f"{lookback_start.astimezone(HK_TZ).strftime('%Y-%m-%d %H:%M')} ~ {now.astimezone(HK_TZ).strftime('%Y-%m-%d %H:%M')}",
         "courses": week_courses,
     }
+    return week, new_state, stats
 
 
 # ---------------------------------------------------------------- 周报生成
 
-def render_markdown(week):
+def sub_label(a):
+    """作业提交状态的可读标签。"""
+    if a.get("graded"):
+        score = a.get("score")
+        return f"已评分 {score if score is not None else '-'}分"
+    if a.get("submitted"):
+        return "已提交"
+    if a.get("submitted") is False:
+        return "**未提交**"
+    return "-"
+
+
+def render_markdown(week, token_warn=None, stats=None):
+    stats = stats or {"downloaded": 0, "total": 0}
+    warn_block = [f"> ⚠️ **{token_warn}**", ""] if token_warn else []
     lines = [
         f"# Canvas 每周课程动态周报（{week['date']}）",
         "",
-        f"> 数据抓取时间：{week['generated_at']}（香港时间）；统计范围：过去 7 天新增 + 未来 7 天截止。",
+        f"> 数据抓取时间：{week['generated_at']}；统计范围：过去 7 天新增 + 未来 7 天截止。",
         "",
+    ] + warn_block + [
         "## 本周总览",
         "",
     ]
@@ -270,31 +426,40 @@ def render_markdown(week):
     n_up = sum(len(c["upcoming"]) for c in week["courses"])
     n_files = sum(len(c["new_files"]) for c in week["courses"])
     n_anns = sum(len(c["announcements"]) for c in week["courses"])
+    n_unsub = sum(1 for c in week["courses"] for a in c["upcoming"] + c["new_assignments"]
+                  if a.get("submitted") is False and not a.get("graded"))
+    n_changes = sum(len(c.get("changes") or []) for c in week["courses"])
     lines += [
         f"- 本学期活跃课程：{len(week['courses'])} 门",
-        f"- 本周新作业/任务：{n_new} 个；未来 7 天截止：{n_up} 个",
-        f"- 本周新上传资料：{n_files} 份；新公告：{n_anns} 条",
+        f"- 本周新作业/任务：{n_new} 个；未来 7 天截止：{n_up} 个（未提交 {n_unsub} 个）",
+        f"- 本周新上传资料：{n_files} 份（已自动下载 {stats.get('downloaded', 0)}/{stats.get('total', 0)} 到 downloads/）",
+        f"- 新公告：{n_anns} 条；与上次相比变化：{n_changes} 处",
         "",
     ]
     def is_active(c):
         return bool(c["new_assignments"] or c["upcoming"] or c["new_files"] or c["announcements"])
 
-    for c in [x for x in week["courses"] if is_active(x)]:
+    for c in [x for x in week["courses"] if is_active(x) or x.get("changes")]:
         lines += [f"## {c['name']}（{c['code']}）", ""]
+        if c.get("changes"):
+            lines += ["### 🔄 与上次相比的变化", ""]
+            for ch in c["changes"]:
+                lines.append(f"- **{ch['type']}**：{ch['name']}（{ch['detail']}）")
+            lines.append("")
         lines += ["### 📝 本周新作业 / 任务", ""]
         if c["new_assignments"]:
-            lines += ["| 任务 | 截止时间 | 分值 | 状态 |", "|---|---|---|---|"]
+            lines += ["| 任务 | 截止时间 | 分值 | 状态 | 提交 |", "|---|---|---|---|---|"]
             for a in c["new_assignments"]:
                 pts = a["points"] if a["points"] is not None else "-"
-                lines.append(f"| [{a['name']}]({a['url']}) | {a['due_at']} | {pts} | {a['status']} |")
+                lines.append(f"| [{a['name']}]({a['url']}) | {a['due_at']} | {pts} | {a['status']} | {sub_label(a)} |")
         else:
             lines.append("本周无新增。")
         lines += ["", "### ⏰ 未来 7 天截止", ""]
         if c["upcoming"]:
-            lines += ["| 任务 | 截止时间 | 分值 |", "|---|---|---|"]
+            lines += ["| 任务 | 截止时间 | 分值 | 提交 |", "|---|---|---|---|"]
             for a in c["upcoming"]:
                 pts = a["points"] if a["points"] is not None else "-"
-                lines.append(f"| [{a['name']}]({a['url']}) | {a['due_at']} | {pts} |")
+                lines.append(f"| [{a['name']}]({a['url']}) | {a['due_at']} | {pts} | {sub_label(a)} |")
         else:
             lines.append("未来 7 天没有截止的任务。")
         lines += ["", "### 📂 本周新上传资料", ""]
@@ -322,10 +487,30 @@ def render_markdown(week):
     return "\n".join(lines)
 
 
-def write_report(week):
+def token_expiry_warning(cfg):
+    """Token 到期倒计时：还剩 token_remind_days（默认 5）天时开始提醒。"""
+    expires = (cfg.get("token_expires_at") or "").strip()
+    if not expires:
+        return None
+    try:
+        exp_date = datetime.strptime(expires, "%Y-%m-%d").date()
+    except ValueError:
+        return f"token_expires_at 格式应为 YYYY-MM-DD（当前值：{expires}）"
+    remaining = (exp_date - datetime.now(HK_TZ).date()).days
+    remind_days = int(cfg.get("token_remind_days", 5))
+    if remaining < 0:
+        return f"Token 已于 {expires} 过期，请立即到 Canvas「账户→设置」重新生成并更新 canvas_config.json！"
+    if remaining == 0:
+        return f"Token 今天（{expires}）到期！请立即到 Canvas 重新生成并更新 canvas_config.json。"
+    if remaining <= remind_days:
+        return f"Token 仅剩 {remaining} 天到期（{expires}），请尽快到 Canvas 重新生成并更新 canvas_config.json。"
+    return None
+
+
+def write_report(week, token_warn=None, stats=None):
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
     path = REPORT_DIR / f"canvas周报_{week['date']}.md"
-    path.write_text(render_markdown(week), encoding="utf-8")
+    path.write_text(render_markdown(week, token_warn, stats), encoding="utf-8")
     return path
 
 
@@ -359,12 +544,19 @@ def update_site(cfg, week):
         html = template.read_text(encoding="utf-8")
         if not deployed.is_file() or deployed.read_text(encoding="utf-8") != html:
             deployed.write_text(html, encoding="utf-8")
+    # 截止日历文件一并放进看板仓库，供页面下载/订阅
+    ics_src = BASE_DIR / "deadlines.ics"
+    if ics_src.is_file():
+        shutil.copy2(ics_src, repo_dir / "deadlines.ics")
 
     def git(*args, check=True):
         return subprocess.run(["git", *args], cwd=repo_dir, check=check,
                               capture_output=True, text=True, encoding="utf-8")
 
-    git("add", "data.json", "index.html")
+    add_paths = ["data.json", "index.html"]
+    if (repo_dir / "deadlines.ics").is_file():
+        add_paths.append("deadlines.ics")
+    git("add", *add_paths)
     commit = git("commit", "-m", f"周报更新 {week['date']}", check=False)
     if commit.returncode != 0:
         return "数据已更新，但无内容变化，未提交"
@@ -394,25 +586,35 @@ def main():
         sys.exit(2)
 
     try:
-        week = fetch_week_data(cfg)
+        week, new_state, stats = fetch_week_data(cfg)
     except RuntimeError as e:
         print(f"FETCH_FAILED: {e}")
         sys.exit(1)
+    save_last_state(new_state)
 
-    report_path = write_report(week)
+    ics_path = BASE_DIR / "deadlines.ics"
+    ics_count = build_ics(week, ics_path)
+
+    token_warn = token_expiry_warning(cfg)
+    report_path = write_report(week, token_warn, stats)
     site_status = update_site(cfg, week)
 
     n_new = sum(len(c["new_assignments"]) for c in week["courses"])
     n_up = sum(len(c["upcoming"]) for c in week["courses"])
     n_files = sum(len(c["new_files"]) for c in week["courses"])
     n_anns = sum(len(c["announcements"]) for c in week["courses"])
-    print(f"OK 课程数={len(week['courses'])} 新作业={n_new} 即将截止={n_up} "
-          f"新资料={n_files} 新公告={n_anns}")
+    n_unsub = sum(1 for c in week["courses"] for a in c["upcoming"] + c["new_assignments"]
+                  if a.get("submitted") is False and not a.get("graded"))
+    print(f"OK 课程数={len(week['courses'])} 新作业={n_new} 即将截止={n_up}（未提交 {n_unsub}） "
+          f"新资料={n_files} 新公告={n_anns} 下载={stats['downloaded']}/{stats['total']} 日历事件={ics_count}")
+    if token_warn:
+        print(f"TOKEN_WARNING: {token_warn}")
     print(f"报告文件：{report_path}")
-    print(f"网站状态：{site_status}")
+    print(f"日历文件：{ics_path}（可导入手机日历）")
+    print(f"看板状态：{site_status}；本地看板：双击 启动学习看板.bat")
     gh = cfg.get("github") or {}
-    if gh.get("username"):
-        print(f"网站地址：https://{gh['username'].lower()}.github.io/{gh.get('repo_name', 'learning-hub')}/")
+    if gh.get("username") and gh.get("repo_name"):
+        print(f"云端备份仓库：https://github.com/{gh['username']}/{gh['repo_name']}（私有）")
 
 
 if __name__ == "__main__":
