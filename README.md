@@ -17,11 +17,11 @@ git clone https://github.com/Famalhaut04/canvas-weekly-hub.git
 
 ### 🅱️ 没有 agent 使用习惯 —— 下载安装包，双击即用
 
-**👉 [下载 CityU-Canvas-Assistant-v1.0.0.exe](https://github.com/Famalhaut04/canvas-weekly-hub/releases/latest)**（Windows，约 12 MB，**无需安装 Python**）
+**👉 [下载 CityU-Canvas-Assistant-v1.1.0.exe](https://github.com/Famalhaut04/canvas-weekly-hub/releases/latest)**（Windows，约 12 MB，**无需安装 Python**）
 
-双击运行 → 粘贴令牌 → 点「测试连接」→ 设置星期时间 → 点「注册定时任务」。之后每周到点自动抓取并弹出本周看板。
+双击运行 → 像安装普通软件一样走四步向导（选保存位置 → 粘贴令牌 → 设定时推送 → 完成）。之后每周到点自动抓取，并生成**双击即开的「我的学习网站.html」**。
 
-![软件界面](docs/screenshots/app-gui.png)
+![软件主界面](docs/screenshots/app-main.png)
 
 完整说明见 **[安装包使用手册](docs/安装包使用手册.md)**。
 

@@ -686,6 +686,11 @@ def run_once(cfg=None, quiet=False):
     result["standalone"] = write_standalone_html(
         week, json.dumps(payload, ensure_ascii=False), ics_text,
         REPORT_DIR / f"本周课程动态_{week['date']}.html")
+    # 固定名称的「我的学习网站.html」：给用户一个永远可点击的入口，每次运行自动更新
+    if result["standalone"]:
+        alias = BASE_DIR / "我的学习网站.html"
+        shutil.copyfile(result["standalone"], alias)
+        result["website"] = alias
     result["ok"] = True
     return result
 

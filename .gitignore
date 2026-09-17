@@ -24,3 +24,5 @@ deadlines.ics
 build/
 dist/
 *.spec
+hub_home.json
+我的学习网站.html
