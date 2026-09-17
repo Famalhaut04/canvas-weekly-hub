@@ -1,17 +1,32 @@
 # Canvas Weekly Hub 🎓
 
-**Canvas Weekly Hub** —— 为**香港城市大学（CityU）学生**打造的全自动 Canvas 课程周报与本地学习看板，基于 [Canvas LMS](https://www.instructure.com/canvas) API，同样兼容其他使用 Canvas 的学校。
+**城大 Canvas 课程助手** —— 为**香港城市大学（CityU）学生**打造的全自动 Canvas 课程周报与学习看板，基于 [Canvas LMS](https://www.instructure.com/canvas) API，同样兼容其他使用 Canvas 的学校。
 
-定时抓取你在 Canvas 上的全部课程动态，生成中文周报保存到本地，并更新一个属于你的学习看板：默认**本地打开、完全私密**（选了什么课属于个人隐私），也可自行发布到你自己的仓库或 GitHub Pages。**算法公开，数据私有**——本仓库不含任何人的课程数据与凭证。
+定时抓取你在 Canvas 上的全部课程动态：新作业、未提交任务、老师改的截止时间、新上传的 PPT、新公告，汇总成周报与一个属于你的学习看板。**算法公开，数据私有**——你的课程信息只留在你自己的电脑上，本仓库不含任何人的凭证与数据。
 
-> 下方截图为**虚构示例数据**的界面预览（不含任何真实用户的课程信息）。
+## 🚀 两种用法，选一个
 
-### 🏫 CityU 学生快速通道
+### 🅰️ 有 AI agent 使用习惯（如 ZCode / Claude Code）—— 克隆仓库，导入定时任务
 
-- Canvas 地址已在示例配置中预填 `https://canvas.cityu.edu.hk`，生成 Token 填入即可使用；
-- CityU 的 API Token **最长有效期 90 天**，到期后自动化会明确报认证失败，届时重新生成替换即可（详见部署指南）；
-- 只想看本学期课程：把配置里的 `term_filter` 设为 `2026/27 Semester A`；
-- 本项目只覆盖 Canvas，AIMS、校园邮箱等其他系统不在范围内。
+```bash
+git clone https://github.com/Famalhaut04/canvas-weekly-hub.git
+```
+
+按 **[部署指南](docs/部署指南.md)** 配置令牌，然后把每周定时任务导入你的 agent，之后每周五晚自动抓取并**用中文向你汇报**。
+功能最全：可同时更新本地看板、备份到你的私有仓库、生成单文件看板与 ICS 日历。
+
+### 🅱️ 没有 agent 使用习惯 —— 下载安装包，双击即用
+
+**👉 [下载 CityU-Canvas-Assistant-v1.0.0.exe](https://github.com/Famalhaut04/canvas-weekly-hub/releases/latest)**（Windows，约 12 MB，**无需安装 Python**）
+
+双击运行 → 粘贴令牌 → 点「测试连接」→ 设置星期时间 → 点「注册定时任务」。之后每周到点自动抓取并弹出本周看板。
+
+![软件界面](docs/screenshots/app-gui.png)
+
+完整说明见 **[安装包使用手册](docs/安装包使用手册.md)**。
+
+> 两条路径用的是同一个抓取引擎，数据格式完全一致，随时可以互相切换。
+
 
 ## ✨ 功能
 
@@ -27,52 +42,56 @@
 - 🔍 **跨周搜索**：按名称检索历史全部作业、资料、公告
 - 🌗 **深色模式**：跟随系统，亦可手动切换
 - 📄 **本地周报**：每次生成 markdown 文件存档，方便复习
-- 🤖 **AI 汇报**（可选）：配合 ZCode 自动化任务，每周五晚用中文向你汇报本周要点
-
-## 🖼 界面
-
-| 桌面 · 浅色 | 手机 · 深色 |
-|---|---|
-| ![桌面浅色](docs/screenshots/site-desktop-light.png) | ![手机深色](docs/screenshots/site-mobile-dark.png) |
+- 📦 **单文件看板**：生成一个自包含的 HTML，双击即开，无需服务器、可拷到手机看
+- 🖥 **图形界面**（方式 B）：不用命令行，填写即可用，自动注册 Windows 定时任务
+- 🤖 **AI 汇报**（方式 A）：配合 ZCode 自动化任务，每周五晚用中文向你汇报本周要点
 
 ## 🔧 工作原理
 
 ```
-定时任务（ZCode / 任务计划程序）
-        │ 每周五 19:00
-        ▼
-canvas_weekly_report.py
-        │ Canvas REST API（你的个人 Token，只存本地）
-        ▼
- ┌────────────────────┬─────────────────────────┐
- ▼                    ▼                         ▼
-reports/周报.md      看板仓库 data.json        终端摘要输出
-（本地存档）          （git push 云端备份）      （AI 任务整理后汇报）
-                      ▼
-              学习看板（默认本地打开 http://localhost:8137/，
-              也可自行发布到 GitHub Pages）
+             每周定时触发（agent 定时任务 / Windows 计划任务）
+                              │
+                              ▼
+                   canvas_weekly_report.py （同一个抓取引擎）
+                              │ Canvas REST API（你的个人 Token，只存本地）
+                              ▼
+        ┌─────────────────────┼─────────────────────┬──────────────────┐
+        ▼                     ▼                     ▼                  ▼
+ reports/周报.md        看板 data.json        单文件看板 HTML      ICS 日历
+ （本地存档）           （可选推送私有仓库备份）  （双击即开）        （导入手机）
+                              │
+                              ▼
+                    学习看板：待办倒计时、提交状态、
+                    变化检测、新资料、历史归档、跨周搜索
 ```
 
-## 🚀 快速开始
+## 🏫 CityU 学生快速通道
 
-完整分步教程见 **[docs/部署指南.md](docs/部署指南.md)**，大致流程（约 30 分钟）：
-
-1. 克隆本仓库作为工作目录，安装 Python 3.10+ / Git / GitHub CLI
-2. 从学校 Canvas 网页生成个人 API Token
-3. 复制 `config/canvas_config.example.json` 为 `canvas_config.json`，**填入你自己的 Token**
-4. 建一个你自己的看板仓库（推荐设为 Private，本地打开；想上网页再开 Pages）
-5. 跑一次脚本验证，然后在 ZCode 里创建每周定时任务
+- Canvas 地址已在示例配置中预填 `https://canvas.cityu.edu.hk`，生成令牌填入即可使用；
+- CityU 的 API 令牌**最长有效期 90 天**，请在配置里填写到期日，程序会在**剩 5 天**时提醒你更换；
+- 只想看本学期课程：把配置里的 `term_filter` 设为 `2026/27 Semester A`；
+- 本项目只覆盖 Canvas，AIMS、校园邮箱等其他系统不在范围内。
 
 ## 📁 目录结构
 
 ```
-canvas_weekly_report.py      # 周报脚本：抓取 Canvas → 生成周报 → 更新网站
+canvas_weekly_report.py      # 抓取引擎：拉 Canvas 数据 → 周报 → 看板 → 日历（命令行）
+app/cityu_canvas_assistant.py # 图形界面小软件（方式 B）：配置、测连接、注册定时任务
 site-template/index.html     # 学习看板首页模板（单文件，无构建依赖）
 config/canvas_config.example.json   # 配置模板（Token 留空，由你自己填写）
-config/data.template.json    # 网站初始空数据文件
-docs/部署指南.md              # 从零到跑通的完整分步教程
+config/data.template.json    # 看板初始空数据文件
+docs/部署指南.md              # 方式 A：从零跑通的完整教程（含导入 agent 定时任务）
+docs/安装包使用手册.md         # 方式 B：安装包版使用说明（面向非技术同学）
 docs/screenshots/            # 界面截图
 ```
+
+## 🖼 看板预览
+
+> 以下截图为**虚构示例数据**（不含任何真实用户的课程信息）。
+
+| 桌面 · 浅色 | 手机 · 深色 |
+|---|---|
+| ![桌面浅色](docs/screenshots/site-desktop-light.png) | ![手机深色](docs/screenshots/site-mobile-dark.png) |
 
 ## ⚙️ 配置说明
 

@@ -19,3 +19,8 @@ Thumbs.db
 downloads/
 last_state.json
 deadlines.ics
+
+# 打包产物
+build/
+dist/
+*.spec

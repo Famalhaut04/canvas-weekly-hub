@@ -22,6 +22,7 @@
 
 import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -33,9 +34,44 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 HK_TZ = timezone(timedelta(hours=8))  # 默认 UTC+8，可被配置项 tz_offset_hours 覆盖
-BASE_DIR = Path(__file__).resolve().parent
+
+
+def resolve_base_dir():
+    """确定数据目录：配置文件、周报、下载、快照都放这里。
+
+    - 若设置了环境变量 CANVAS_HUB_DATA_DIR，优先使用（便于测试或多实例）；
+    - 若被 PyInstaller 打包成 exe，用 exe 所在目录（__file__ 在 exe 里指向临时解压目录，
+      写入那里会在退出时丢失）；
+    - 否则用脚本所在目录。
+    """
+    env = os.environ.get("CANVAS_HUB_DATA_DIR")
+    if env:
+        p = Path(env)
+        p.mkdir(parents=True, exist_ok=True)
+        return p
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent
+
+
+def resolve_resource(rel_path):
+    """查找随程序分发的只读资源（如页面模板）：exe 内置资源 → 数据目录 → 脚本目录。"""
+    candidates = []
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        candidates.append(Path(meipass) / rel_path)
+    candidates.append(BASE_DIR / rel_path)
+    candidates.append(Path(__file__).resolve().parent / rel_path)
+    for c in candidates:
+        if c.is_file():
+            return c
+    return None
+
+
+BASE_DIR = resolve_base_dir()
 CONFIG_PATH = BASE_DIR / "canvas_config.json"
 REPORT_DIR = BASE_DIR / "reports"
+LOCAL_DATA = BASE_DIR / "data.json"
 PER_PAGE = 100
 MAX_PAGES = 20
 
@@ -141,19 +177,22 @@ def save_last_state(state):
 # ---------------------------------------------------------------- 课件下载
 
 def download_new_file(base, token, cid, fobj, dest_dir):
-    """下载单个新文件，返回本地路径；失败返回 None。已存在且大小一致时跳过。"""
+    """下载单个新文件，返回 (状态, 本地路径)。
+
+    状态为 "downloaded"（实际下载）、"skipped"（本地已有同大小文件）或 None（失败）。
+    """
     fid = fobj.get("id")
     if not fid:
-        return None
+        return None, None
     safe_name = re.sub(r'[\\/:*?"<>|]', "_", fobj.get("name", f"file_{fid}"))
     dest = dest_dir / safe_name
     try:
         if fobj.get("size_bytes") and dest.exists() and dest.stat().st_size == fobj["size_bytes"]:
-            return str(dest)  # 与上次下载一致，跳过
+            return "skipped", str(dest)
         meta = api_get_all(base, token, f"/courses/{cid}/files/{fid}")
         url = (meta[0] if isinstance(meta, list) else meta).get("url")
         if not url:
-            return None
+            return None, None
         req = urllib.request.Request(url)
         with urllib.request.urlopen(req, timeout=180) as resp, open(dest, "wb") as out:
             while True:
@@ -161,12 +200,12 @@ def download_new_file(base, token, cid, fobj, dest_dir):
                 if not chunk:
                     break
                 out.write(chunk)
-        return str(dest)
+        return "downloaded", str(dest)
     except Exception as e:  # 下载失败不阻断整体流程
         print(f"  [下载失败] {fobj.get('name')}: {e}", file=sys.stderr)
         if dest.exists():
             dest.unlink(missing_ok=True)
-        return None
+        return None, None
 
 
 # ---------------------------------------------------------------- ICS 日历导出
@@ -239,7 +278,7 @@ def fetch_week_data(cfg):
     term_filter = (cfg.get("term_filter") or "").strip()
     prev_state = load_last_state()
     new_state = {"assignments": {}}
-    stats = {"downloaded": 0, "total": 0}
+    stats = {"downloaded": 0, "skipped": 0, "failed": 0, "total": 0}
 
     now = datetime.now(timezone.utc)
     lookback_start = now - timedelta(days=lookback_days)
@@ -354,10 +393,14 @@ def fetch_week_data(cfg):
             dl_dir.mkdir(parents=True, exist_ok=True)
             for f_ in new_files:
                 stats["total"] += 1
-                saved = download_new_file(base, token, cid, f_, dl_dir)
+                status, saved = download_new_file(base, token, cid, f_, dl_dir)
                 f_["saved"] = bool(saved)
-                if saved:
+                if status == "downloaded":
                     stats["downloaded"] += 1
+                elif status == "skipped":
+                    stats["skipped"] += 1
+                else:
+                    stats["failed"] += 1
 
         # ---- 公告 ----
         try:
@@ -411,7 +454,7 @@ def sub_label(a):
 
 
 def render_markdown(week, token_warn=None, stats=None):
-    stats = stats or {"downloaded": 0, "total": 0}
+    stats = stats or {"downloaded": 0, "skipped": 0, "failed": 0, "total": 0}
     warn_block = [f"> ⚠️ **{token_warn}**", ""] if token_warn else []
     lines = [
         f"# Canvas 每周课程动态周报（{week['date']}）",
@@ -432,7 +475,7 @@ def render_markdown(week, token_warn=None, stats=None):
     lines += [
         f"- 本学期活跃课程：{len(week['courses'])} 门",
         f"- 本周新作业/任务：{n_new} 个；未来 7 天截止：{n_up} 个（未提交 {n_unsub} 个）",
-        f"- 本周新上传资料：{n_files} 份（已自动下载 {stats.get('downloaded', 0)}/{stats.get('total', 0)} 到 downloads/）",
+        f"- 本周新上传资料：{n_files} 份（新下载 {stats.get('downloaded', 0)} 份，已存在跳过 {stats.get('skipped', 0)} 份，失败 {stats.get('failed', 0)} 份）",
         f"- 新公告：{n_anns} 条；与上次相比变化：{n_changes} 处",
         "",
     ]
@@ -516,31 +559,46 @@ def write_report(week, token_warn=None, stats=None):
 
 # ---------------------------------------------------------------- 网站更新
 
+def site_payload(cfg, week, weeks):
+    """构造看板数据结构（与 data.json 同构，本地归档与云端仓库共用）。"""
+    gh = cfg.get("github") or {}
+    return {
+        "site_title": "我的学习中心",
+        "canvas_url": cfg["canvas_url"],
+        "username": gh.get("username", ""),
+        "tz_label": "UTC%+g" % float(cfg.get("tz_offset_hours", 8)),
+        "updated_at": week["generated_at"],
+        "weeks": weeks[:52],
+    }
+
+
+def load_local_weeks():
+    try:
+        data = json.loads(LOCAL_DATA.read_text(encoding="utf-8"))
+        return data.get("weeks", []) if isinstance(data, dict) else []
+    except (FileNotFoundError, json.JSONDecodeError):
+        return []
+
+
 def update_site(cfg, week):
     gh = cfg.get("github") or {}
     repo_dir = Path(gh.get("repo_dir", ""))
-    if not gh.get("push_enabled", False) or not repo_dir.is_dir():
-        return "已跳过（网站仓库未配置或不存在）"
-    data_path = repo_dir / "data.json"
-    try:
-        data = json.loads(data_path.read_text(encoding="utf-8")) if data_path.exists() else {}
-    except json.JSONDecodeError:
-        data = {}
-    weeks = data.get("weeks", [])
-    weeks = [w for w in weeks if w.get("date") != week["date"]]
+    # 本地归档：无论是否配置云端仓库都维护，供单文件看板与历史检索使用
+    weeks = [w for w in load_local_weeks() if w.get("date") != week["date"]]
     weeks.insert(0, week)
-    data["site_title"] = "我的学习中心"
-    data["canvas_url"] = cfg["canvas_url"]
-    data["username"] = gh.get("username", "")
-    data["tz_label"] = "UTC%+g" % float(cfg.get("tz_offset_hours", 8))
-    data["updated_at"] = week["generated_at"]
-    data["weeks"] = weeks[:52]
-    data_path.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+    payload = site_payload(cfg, week, weeks)
+    LOCAL_DATA.write_text(json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8")
+
+    if not gh.get("push_enabled", False) or not repo_dir.is_dir():
+        return "数据已存本地（未配置云端仓库，跳过推送）"
+
+    data_path = repo_dir / "data.json"
+    data_path.write_text(json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8")
 
     # 页面模板有改动时同步到仓库，避免线上页面与模板脱节
-    template = BASE_DIR / "site-template" / "index.html"
+    template = resolve_resource("site-template/index.html")
     deployed = repo_dir / "index.html"
-    if template.is_file():
+    if template:
         html = template.read_text(encoding="utf-8")
         if not deployed.is_file() or deployed.read_text(encoding="utf-8") != html:
             deployed.write_text(html, encoding="utf-8")
@@ -569,6 +627,69 @@ def update_site(cfg, week):
 
 # ---------------------------------------------------------------- 主流程
 
+def write_standalone_html(week, js_data, ics_text, path):
+    """把页面模板与数据合成单个 HTML 文件，双击即可打开（无需服务器、无跨域限制）。
+
+    给不使用 agent 的同学用：定时任务跑完直接打开这个文件就能看到本周动态。
+    """
+    tpl_path = resolve_resource("site-template/index.html")
+    if not tpl_path:
+        return None
+    html = tpl_path.read_text(encoding="utf-8")
+    payload = (f"<script>window.__HUB_DATA__ = {js_data};"
+               f"window.__HUB_ICS__ = {json.dumps(ics_text, ensure_ascii=False)};</script>\n</head>")
+    html = html.replace("</head>", payload, 1)
+    path.write_text(html, encoding="utf-8")
+    return path
+
+
+def test_connection(cfg):
+    """测试 Token 是否可用，返回 (是否成功, 提示信息)。"""
+    try:
+        courses = api_get_all(cfg["canvas_url"], cfg["access_token"].strip(), "/courses",
+                              {"enrollment_state": "active"})
+    except RuntimeError as e:
+        return False, str(e)
+    names = [c.get("name", "") for c in courses[:3]]
+    return True, f"连接成功，检测到 {len(courses)} 门活跃课程。" + \
+                 (f"例如：{'、'.join(names)}" if names else "")
+
+
+def run_once(cfg=None, quiet=False):
+    """执行一次完整抓取流程，返回状态字典（不退出进程，供命令行与图形界面共用）。"""
+    cfg = cfg or load_config()
+    result = {"ok": False, "error": None, "week": None,
+              "stats": {"downloaded": 0, "skipped": 0, "failed": 0, "total": 0},
+              "report": None, "ics": None, "ics_count": 0, "standalone": None,
+              "site_status": None, "token_warn": None, "log": None}
+    try:
+        week, new_state, stats = fetch_week_data(cfg)
+    except RuntimeError as e:
+        result["error"] = str(e)
+        return result
+    result["week"] = week
+    result["stats"] = stats
+    save_last_state(new_state)
+
+    ics_path = BASE_DIR / "deadlines.ics"
+    result["ics_count"] = build_ics(week, ics_path)
+    result["ics"] = ics_path
+    ics_text = ics_path.read_text(encoding="utf-8") if ics_path.is_file() else ""
+
+    result["token_warn"] = token_expiry_warning(cfg)
+    result["report"] = write_report(week, result["token_warn"], stats)
+    result["site_status"] = update_site(cfg, week)
+    # 单文件看板带上本地历史归档，双击即可离线查看全部周报
+    weeks = [w for w in load_local_weeks() if w.get("date") != week["date"]]
+    weeks.insert(0, week)
+    payload = site_payload(cfg, week, weeks)
+    result["standalone"] = write_standalone_html(
+        week, json.dumps(payload, ensure_ascii=False), ics_text,
+        REPORT_DIR / f"本周课程动态_{week['date']}.html")
+    result["ok"] = True
+    return result
+
+
 def main():
     global HK_TZ
     cfg = load_config()
@@ -585,33 +706,29 @@ def main():
         print(f"报告文件：{path}")
         sys.exit(2)
 
-    try:
-        week, new_state, stats = fetch_week_data(cfg)
-    except RuntimeError as e:
-        print(f"FETCH_FAILED: {e}")
+    res = run_once(cfg)
+    if not res["ok"]:
+        print(f"FETCH_FAILED: {res['error']}")
         sys.exit(1)
-    save_last_state(new_state)
 
-    ics_path = BASE_DIR / "deadlines.ics"
-    ics_count = build_ics(week, ics_path)
-
-    token_warn = token_expiry_warning(cfg)
-    report_path = write_report(week, token_warn, stats)
-    site_status = update_site(cfg, week)
-
+    week, stats = res["week"], res["stats"]
     n_new = sum(len(c["new_assignments"]) for c in week["courses"])
     n_up = sum(len(c["upcoming"]) for c in week["courses"])
     n_files = sum(len(c["new_files"]) for c in week["courses"])
     n_anns = sum(len(c["announcements"]) for c in week["courses"])
     n_unsub = sum(1 for c in week["courses"] for a in c["upcoming"] + c["new_assignments"]
                   if a.get("submitted") is False and not a.get("graded"))
+    n_changes = sum(len(c.get("changes") or []) for c in week["courses"])
     print(f"OK 课程数={len(week['courses'])} 新作业={n_new} 即将截止={n_up}（未提交 {n_unsub}） "
-          f"新资料={n_files} 新公告={n_anns} 下载={stats['downloaded']}/{stats['total']} 日历事件={ics_count}")
-    if token_warn:
-        print(f"TOKEN_WARNING: {token_warn}")
-    print(f"报告文件：{report_path}")
-    print(f"日历文件：{ics_path}（可导入手机日历）")
-    print(f"看板状态：{site_status}；本地看板：双击 启动学习看板.bat")
+          f"新资料={n_files} 新公告={n_anns} 变化={n_changes} "
+          f"下载={stats['downloaded']}(跳过{stats['skipped']},失败{stats['failed']})/{stats['total']} 日历事件={res['ics_count']}")
+    if res["token_warn"]:
+        print(f"TOKEN_WARNING: {res['token_warn']}")
+    print(f"报告文件：{res['report']}")
+    print(f"日历文件：{res['ics']}（可导入手机日历）")
+    if res["standalone"]:
+        print(f"单机看板：{res['standalone']}（双击即可打开，无需服务器）")
+    print(f"看板状态：{res['site_status']}；本地看板：双击 启动学习看板.bat")
     gh = cfg.get("github") or {}
     if gh.get("username") and gh.get("repo_name"):
         print(f"云端备份仓库：https://github.com/{gh['username']}/{gh['repo_name']}（私有）")

@@ -514,18 +514,30 @@ box.id = "search-results";
 box.style.display = "none";
 $("quiet-panel").after(box);
 
-fetch("data.json", { cache: "no-store" })
-  .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
-  .then(d => {
-    DATA = d || { weeks: [] };
-    if (DATA.canvas_url) $("canvas-link").href = DATA.canvas_url;
-    render();
-  })
-  .catch(() => {
-    $("updated").textContent = "无法加载 data.json";
-    $("courses").innerHTML = `<div class="panel empty">
-      无法加载 data.json。若你是直接以文件方式打开本页属正常现象，请通过 GitHub Pages 访问。</div>`;
-  });
+function boot(data) {
+  DATA = data || { weeks: [] };
+  if (DATA.canvas_url) $("canvas-link").href = DATA.canvas_url;
+  // 自包含单文件模式：把内联的日历内容变成可下载链接
+  if (window.__HUB_ICS__) {
+    const a = $("ics-link");
+    a.href = "data:text/calendar;charset=utf-8," + encodeURIComponent(window.__HUB_ICS__);
+    a.removeAttribute("target");
+  }
+  render();
+}
+
+if (window.__HUB_DATA__) {
+  boot(window.__HUB_DATA__);            // 双击打开的单文件：数据已内嵌
+} else {
+  fetch("data.json", { cache: "no-store" })
+    .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+    .then(boot)
+    .catch(() => {
+      $("updated").textContent = "无法加载 data.json";
+      $("courses").innerHTML = `<div class="panel empty">
+        无法加载 data.json。若你是直接以文件方式打开本页属正常现象，请改用「本周课程动态.html」或通过本地看板访问。</div>`;
+    });
+}
 </script>
 </body>
 </html>
