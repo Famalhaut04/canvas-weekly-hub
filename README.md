@@ -1,10 +1,17 @@
 # Canvas Weekly Hub 🎓
 
-**Canvas Weekly Hub** —— 为 [Canvas LMS](https://www.instructure.com/canvas) 打造的全自动课程周报与个人学习看板。
+**Canvas Weekly Hub** —— 为**香港城市大学（CityU）学生**打造的全自动 Canvas 课程周报与本地学习看板，基于 [Canvas LMS](https://www.instructure.com/canvas) API，同样兼容其他使用 Canvas 的学校。
 
-定时抓取你在 Canvas 上的全部课程动态，生成中文周报保存到本地，并自动发布到一个属于你的 GitHub Pages 学习网站。适用于任何使用 Canvas 的学校（默认示例为香港城市大学，改一行配置即可适配你自己的学校）。
+定时抓取你在 Canvas 上的全部课程动态，生成中文周报保存到本地，并更新一个属于你的学习看板：默认**本地打开、完全私密**（选了什么课属于个人隐私），也可自行发布到你自己的仓库或 GitHub Pages。**算法公开，数据私有**——本仓库不含任何人的课程数据与凭证。
 
 > 下方截图为**虚构示例数据**的界面预览（不含任何真实用户的课程信息）。
+
+### 🏫 CityU 学生快速通道
+
+- Canvas 地址已在示例配置中预填 `https://canvas.cityu.edu.hk`，生成 Token 填入即可使用；
+- CityU 的 API Token **最长有效期 90 天**，到期后自动化会明确报认证失败，届时重新生成替换即可（详见部署指南）；
+- 只想看本学期课程：把配置里的 `term_filter` 设为 `2026/27 Semester A`；
+- 本项目只覆盖 Canvas，AIMS、校园邮箱等其他系统不在范围内。
 
 ## ✨ 功能
 
@@ -34,10 +41,11 @@ canvas_weekly_report.py
         ▼
  ┌────────────────────┬─────────────────────────┐
  ▼                    ▼                         ▼
-reports/周报.md      网站仓库 data.json        终端摘要输出
-（本地存档）          （git push）              （AI 任务整理后汇报）
+reports/周报.md      看板仓库 data.json        终端摘要输出
+（本地存档）          （git push 云端备份）      （AI 任务整理后汇报）
                       ▼
-              GitHub Pages 学习网站
+              学习看板（默认本地打开 http://localhost:8137/，
+              也可自行发布到 GitHub Pages）
 ```
 
 ## 🚀 快速开始
@@ -47,14 +55,14 @@ reports/周报.md      网站仓库 data.json        终端摘要输出
 1. 克隆本仓库作为工作目录，安装 Python 3.10+ / Git / GitHub CLI
 2. 从学校 Canvas 网页生成个人 API Token
 3. 复制 `config/canvas_config.example.json` 为 `canvas_config.json`，**填入你自己的 Token**
-4. 用 `gh` 创建你自己的 GitHub Pages 仓库并推送初始文件
+4. 建一个你自己的看板仓库（推荐设为 Private，本地打开；想上网页再开 Pages）
 5. 跑一次脚本验证，然后在 ZCode 里创建每周定时任务
 
 ## 📁 目录结构
 
 ```
 canvas_weekly_report.py      # 周报脚本：抓取 Canvas → 生成周报 → 更新网站
-site-template/index.html     # 学习网站首页模板（单文件，无构建依赖）
+site-template/index.html     # 学习看板首页模板（单文件，无构建依赖）
 config/canvas_config.example.json   # 配置模板（Token 留空，由你自己填写）
 config/data.template.json    # 网站初始空数据文件
 docs/部署指南.md              # 从零到跑通的完整分步教程
@@ -74,7 +82,7 @@ docs/screenshots/            # 界面截图
 | `tz_offset_hours` | 展示用时区偏移（小时） | 8（UTC+8） |
 | `term_filter` | 只统计匹配该关键字的学期，留空 = 全部活跃课程 | 空 |
 | `github.username` | 你的 GitHub 用户名 | — |
-| `github.repo_name` | 你的学习网站仓库名 | learning-hub |
+| `github.repo_name` | 你的看板数据仓库名 | learning-hub |
 | `github.repo_dir` | 本机网站仓库的绝对路径 | — |
 | `github.push_enabled` | 是否自动 commit + push 网站数据 | true |
 
