@@ -1,0 +1,16 @@
+# ⚠️ 含个人凭证的配置文件，绝不提交
+canvas_config.json
+
+# 个人数据与本地生成的周报
+reports/
+site-repo/
+
+# 临时与缓存
+__pycache__/
+*.pyc
+diag*.html
+*.log
+
+# 系统文件
+.DS_Store
+Thumbs.db

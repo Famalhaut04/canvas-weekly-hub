@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>我的学习中心 · Canvas 课程周报</title>
+<style>
+  :root {
+    --bg: #f4f6fb; --panel: #fff; --panel-2: #fafbfe; --ink: #111827; --muted: #6b7280;
+    --line: #e7eaf1; --brand: #1e5aa8; --brand-2: #3b82f6; --accent: #0d9488;
+    --urgent: #e11d48; --urgent-bg: #fff1f2; --soon: #c2740a; --soon-bg: #fff8ec;
+    --far: #0f766e; --far-bg: #f0fdfa; --chip: #eef2ff;
+    --shadow: 0 1px 2px rgba(16,24,40,.04), 0 10px 26px -14px rgba(16,24,40,.22);
+  }
+  [data-theme="dark"] {
+    --bg: #0d1117; --panel: #161b22; --panel-2: #1b2130; --ink: #e6edf3; --muted: #8b949e;
+    --line: #27303d; --brand: #58a6ff; --brand-2: #79c0ff; --accent: #2dd4bf;
+    --urgent: #ff7b72; --urgent-bg: #2b1518; --soon: #e3b341; --soon-bg: #2a2312;
+    --far: #3fb950; --far-bg: #0f2419; --chip: #1e2735;
+    --shadow: 0 1px 2px rgba(0,0,0,.5), 0 14px 30px -16px rgba(0,0,0,.8);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--ink); line-height: 1.6;
+         font-family: "Segoe UI", "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
+         -webkit-font-smoothing: antialiased; }
+  a { color: var(--brand-2); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  button { font: inherit; cursor: pointer; }
+
+  /* ---------- 顶栏 ---------- */
+  header { position: sticky; top: 0; z-index: 20; color: #fff;
+           background: linear-gradient(120deg, #17427d 0%, #1e5aa8 55%, #2e86de 100%);
+           box-shadow: 0 6px 20px -12px rgba(16,24,40,.6); }
+  .bar { max-width: 1060px; margin: 0 auto; padding: 14px 18px;
+         display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  .brand { font-size: 1.12rem; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+  .brand small { font-weight: 400; opacity: .8; font-size: .78rem;
+                 border-left: 1px solid rgba(255,255,255,.35); padding-left: 9px; }
+  .bar .spacer { flex: 1 1 auto; }
+  .search { display: flex; align-items: center; gap: 6px; background: rgba(255,255,255,.16);
+            border: 1px solid rgba(255,255,255,.25); border-radius: 999px;
+            padding: 5px 12px; flex: 1 1 160px; min-width: 0; max-width: 280px; }
+  .search input { background: none; border: 0; outline: 0; color: #fff; width: 100%; font-size: .88rem; }
+  .search input::placeholder { color: rgba(255,255,255,.7); }
+  .icon-btn { background: rgba(255,255,255,.16); border: 1px solid rgba(255,255,255,.25);
+              color: #fff; border-radius: 999px; width: 34px; height: 34px; line-height: 1; }
+  .icon-btn:hover { background: rgba(255,255,255,.28); }
+  .meta { max-width: 1060px; margin: 0 auto; padding: 0 18px 12px; font-size: .8rem;
+          color: rgba(255,255,255,.85); display: flex; gap: 10px; flex-wrap: wrap; }
+  .meta i { font-style: normal; opacity: .55; }
+
+  /* ---------- 布局 ---------- */
+  main { max-width: 1060px; margin: 22px auto 70px; padding: 0 18px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 16px;
+           box-shadow: var(--shadow); padding: 18px 20px; margin-bottom: 18px; }
+  .panel > h2 { font-size: 1rem; display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+  .panel > h2 .cnt { font-size: .78rem; font-weight: 600; color: var(--muted);
+                     background: var(--panel-2); border: 1px solid var(--line);
+                     border-radius: 999px; padding: 1px 9px; }
+  .hint { font-size: .82rem; color: var(--muted); margin-bottom: 12px; }
+  /* minmax(0,…) 很关键：默认的 auto 最小值会让面板被内容撑破视口 */
+  .cols { display: grid; gap: 18px; grid-template-columns: minmax(0, 1fr); }
+  .cols > .panel { min-width: 0; }
+  @media (min-width: 780px) { .cols { grid-template-columns: minmax(0, 1.15fr) minmax(0, .85fr); } }
+
+  /* ---------- 周切换 ---------- */
+  .weeks { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 10px; margin-bottom: 4px;
+           scrollbar-width: thin; }
+  .wchip { flex: 0 0 auto; background: var(--panel); border: 1px solid var(--line); color: var(--muted);
+           border-radius: 999px; padding: 6px 14px; font-size: .84rem; box-shadow: var(--shadow); }
+  .wchip:hover { color: var(--ink); }
+  .wchip[aria-current="true"] { background: var(--brand); border-color: var(--brand);
+                                color: #fff; font-weight: 600; }
+
+  /* ---------- 统计 ---------- */
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(122px, 100%), 1fr));
+           gap: 12px; margin-bottom: 18px; }
+  .stat { background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+          padding: 14px 16px; box-shadow: var(--shadow); }
+  .stat b { display: block; font-size: 1.6rem; line-height: 1.25; }
+  .stat span { font-size: .8rem; color: var(--muted); }
+  .stat.hot b { color: var(--urgent); }
+
+  /* ---------- 条目行 ---------- */
+  .row { display: flex; align-items: center; gap: 10px; padding: 9px 0;
+         border-bottom: 1px dashed var(--line); }
+  .row:last-child { border-bottom: 0; }
+  .row .ico { flex: 0 0 auto; width: 26px; text-align: center; font-size: 1rem; }
+  .row .grow { flex: 1 1 auto; min-width: 0; }
+  .row .grow a { font-weight: 600; display: inline-block; max-width: 100%; min-width: 0;
+                 overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
+  .row .sub { font-size: .78rem; color: var(--muted); display: block; }
+  .row .tail { flex: 0 0 auto; text-align: right; font-size: .78rem; color: var(--muted); }
+  .pill { display: inline-block; border-radius: 999px; padding: 1px 8px; font-size: .72rem;
+          font-weight: 600; background: var(--chip); color: var(--brand); }
+  .pill.new { background: var(--far-bg); color: var(--far); }
+  .pill.upd { background: var(--soon-bg); color: var(--soon); }
+  .pill.pts { background: var(--panel-2); color: var(--muted); border: 1px solid var(--line); }
+  .due { display: inline-block; border-radius: 8px; padding: 2px 9px; font-size: .75rem;
+         font-weight: 600; white-space: nowrap; }
+  .due span { font-weight: 700; margin-left: 5px; }
+  .due.over { background: var(--panel-2); color: var(--muted); }
+  .due.urgent { background: var(--urgent-bg); color: var(--urgent); }
+  .due.soon { background: var(--soon-bg); color: var(--soon); }
+  .due.far { background: var(--far-bg); color: var(--far); }
+
+  /* 窄屏：把分值/状态/截止时间折到第二行，与文字左对齐 */
+  @media (max-width: 560px) {
+    .row { flex-wrap: wrap; }
+    .row .tail { flex: 1 1 100%; text-align: left; margin-left: 36px; }
+    .meta i { display: none; }          /* 折行后行尾的 · 会变成孤零零的尾巴 */
+  }
+
+  /* ---------- 课程卡片 ---------- */
+  .course { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--brand);
+            border-radius: 14px; box-shadow: var(--shadow); margin-bottom: 12px; overflow: hidden; }
+  .course > summary { list-style: none; cursor: pointer; padding: 14px 18px;
+                      display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .course > summary::-webkit-details-marker { display: none; }
+  .course > summary:hover { background: var(--panel-2); }
+  .course .cname { font-weight: 700; font-size: .98rem; }
+  .course .ccode { font-size: .75rem; color: var(--muted); }
+  .course .badges { display: flex; gap: 6px; flex-wrap: wrap; margin-left: auto; align-items: center; }
+  .course .caret { color: var(--muted); font-size: .8rem; transition: transform .15s; }
+  .course[open] .caret { transform: rotate(90deg); }
+  .course .body { padding: 2px 18px 16px; border-top: 1px solid var(--line); }
+  .course h4 { font-size: .85rem; color: var(--brand); margin: 14px 0 2px;
+               display: flex; align-items: center; gap: 6px; }
+  .course h4 em { font-style: normal; color: var(--muted); font-weight: 400; font-size: .78rem; }
+  .course-link { font-size: .75rem; margin-top: 12px; display: inline-block; }
+
+  /* ---------- 资料网格 ---------- */
+  .files { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(215px, 100%), 1fr));
+           gap: 8px; margin-top: 6px; }
+  .file { display: flex; gap: 9px; align-items: flex-start; background: var(--panel-2);
+          border: 1px solid var(--line); border-radius: 10px; padding: 9px 11px; min-width: 0; }
+  .file .fico { font-size: 1.1rem; line-height: 1.3; }
+  .file .fname { font-size: .84rem; font-weight: 600; overflow-wrap: anywhere;
+                 display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2;
+                 -webkit-box-orient: vertical; overflow: hidden; }
+  .file .fmeta { font-size: .74rem; color: var(--muted); }
+  .ann li { margin: 6px 0 0 18px; font-size: .87rem; }
+  .ann .atext { color: var(--muted); font-size: .82rem; }
+
+  /* ---------- 静默课程 & 空态 ---------- */
+  .quiet-wrap { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 8px; }
+  .qchip { background: var(--panel-2); border: 1px dashed var(--line); color: var(--muted);
+           border-radius: 999px; padding: 4px 12px; font-size: .79rem; }
+  .empty { color: var(--muted); font-size: .87rem; padding: 8px 0; }
+  .good { background: var(--far-bg); color: var(--far); border-radius: 10px;
+          padding: 12px 14px; font-size: .88rem; }
+  .hit-week { font-size: .74rem; color: var(--muted); }
+  footer { text-align: center; color: var(--muted); font-size: .8rem; padding: 0 18px 46px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="bar">
+    <div class="brand">📚 我的学习中心 <small>Canvas 课程周报</small></div>
+    <div class="spacer"></div>
+    <label class="search">🔍
+      <input id="q" type="search" placeholder="搜索作业 / 资料 / 公告" autocomplete="off">
+    </label>
+    <a id="canvas-link" class="icon-btn" title="打开 Canvas" target="_blank" rel="noopener"
+       style="display:grid;place-items:center;text-decoration:none">🎓</a>
+    <button id="theme" class="icon-btn" title="切换深色 / 浅色">🌙</button>
+  </div>
+  <div class="meta">
+    <span id="updated">加载中…</span><i>·</i>
+    <span id="range"></span><i>·</i>
+    <span id="tz-label">UTC+8</span>
+  </div>
+</header>
+
+<main>
+  <nav class="weeks" id="week-nav"></nav>
+  <section class="stats" id="stats"></section>
+  <section class="cols">
+    <div class="panel" id="todo-panel">
+      <h2>⏰ 待办提醒 <span class="cnt" id="todo-cnt"></span></h2>
+      <p class="hint">按截止时间从近到远排列，跨所有课程汇总。</p>
+      <div id="todo"></div>
+    </div>
+    <div class="panel" id="fresh-panel">
+      <h2>🆕 本周新布置 <span class="cnt" id="fresh-cnt"></span></h2>
+      <p class="hint">过去 7 天内老师新布置或有改动的任务。</p>
+      <div id="fresh"></div>
+    </div>
+  </section>
+  <h2 style="font-size:1rem;margin:26px 0 12px">📚 分课程动态</h2>
+  <div id="courses"></div>
+  <section class="panel" id="quiet-panel">
+    <h2>💤 本周无动态的课程 <span class="cnt" id="quiet-cnt"></span></h2>
+    <div class="quiet-wrap" id="quiet"></div>
+  </section>
+</main>
+
+<footer>
+  每周五 19:00 由自动化任务抓取 Canvas 并推送 · 托管于 GitHub Pages
+</footer>
+
+<script>
+/* ================= 工具 ================= */
+const esc = s => String(s === null || s === undefined ? "" : s)
+  .replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const $ = id => document.getElementById(id);
+const HK = "Asia/Hong_Kong";
+const fmtHK = d => new Intl.DateTimeFormat("zh-CN", {
+  timeZone: HK, month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false
+}).format(d);
+
+const FILE_ICON = { PPT: "📊", PDF: "📕", Word: "📄", Excel: "📗", "压缩包": "🗜️",
+                    "代码": "💻", "视频": "🎬", "其他": "📎" };
+const KIND_ICON = { "测验": "🧪", "讨论": "💬", "提交作业": "📤", "外部工具": "🔗",
+                    "不计分": "◻️", "任务": "📌" };
+
+/* 解析截止时间 → {days, label, cls, when} */
+function due(iso, text) {
+  let d = null;
+  if (iso) d = new Date(iso);
+  else if (text && /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}/.test(text))
+    d = new Date(text.replace(" ", "T") + ":00+08:00");
+  if (!d || isNaN(d.getTime())) return { cls: "over", when: text || "无截止时间", label: "" };
+  const days = Math.ceil((d - Date.now()) / 86400000);
+  const when = fmtHK(d);
+  if (days < 0) return { days, cls: "over", when, label: "已截止" };
+  if (days === 0) return { days, cls: "urgent", when, label: "今天" };
+  if (days === 1) return { days, cls: "urgent", when, label: "明天" };
+  if (days <= 3) return { days, cls: "urgent", when, label: days + " 天后" };
+  if (days <= 7) return { days, cls: "soon", when, label: days + " 天后" };
+  return { days, cls: "far", when, label: days + " 天后" };
+}
+const size = b => !b ? "" : b < 1024 ? b + " B"
+  : b < 1048576 ? (b / 1024).toFixed(0) + " KB" : (b / 1048576).toFixed(1) + " MB";
+const fileWhen = f => f.is_update ? (f.updated_at || f.created_at) : f.created_at;
+const active = c => !!(c.new_assignments.length || c.upcoming.length || c.new_files.length || c.announcements.length);
+const score = c => c.new_assignments.length * 3 + c.upcoming.length * 3 + c.new_files.length + c.announcements.length;
+
+/* ================= 渲染片段 ================= */
+function assignRow(a, showStatus) {
+  const d = due(a.due_iso, a.due_at);
+  const pts = a.points === null || a.points === undefined ? "" : `<span class="pill pts">${a.points} 分</span>`;
+  const st = showStatus && a.status
+    ? `<span class="pill ${a.status === "新布置" ? "new" : "upd"}">${a.status}</span>` : "";
+  const icon = KIND_ICON[a.kind] || "📌";
+  return `<div class="row">
+    <span class="ico" title="${esc(a.kind || "任务")}">${icon}</span>
+    <span class="grow">
+      <a href="${esc(a.url)}" target="_blank" rel="noopener">${esc(a.name)}</a>
+      <span class="sub">${esc(a.kind || "任务")}</span>
+    </span>
+    ${pts}${st}
+    <span class="tail"><span class="due ${d.cls}">${esc(d.when)}${d.label ? `<span>${d.label}</span>` : ""}</span></span>
+  </div>`;
+}
+
+function fileCard(f, course) {
+  const href = f.url || (course && course.url) || "#";
+  return `<a class="file" href="${esc(href)}" target="_blank" rel="noopener" title="${esc(f.name)}">
+    <span class="fico">${FILE_ICON[f.kind] || "📎"}</span>
+    <span style="min-width:0">
+      <span class="fname">${esc(f.name)}</span>
+      <span class="fmeta">${esc(f.kind)}${size(f.size_bytes || (f.size_kb ? f.size_kb * 1024 : 0)) ? " · " + size(f.size_bytes || (f.size_kb * 1024)) : ""} ·
+        ${esc(fileWhen(f))}${f.is_update ? " · 有更新" : ""}</span>
+    </span>
+  </a>`;
+}
+
+function courseCard(c, open) {
+  const block = [];
+  if (c.new_assignments.length)
+    block.push(`<h4>📝 新作业 / 任务 <em>${c.new_assignments.length}</em></h4>
+      ${c.new_assignments.map(a => assignRow(a, true)).join("")}`);
+  if (c.upcoming.length)
+    block.push(`<h4>⏰ 未来 7 天截止 <em>${c.upcoming.length}</em></h4>
+      ${c.upcoming.map(a => assignRow(a, false)).join("")}`);
+  if (c.new_files.length)
+    block.push(`<h4>📂 新资料 <em>${c.new_files.length}</em></h4>
+      <div class="files">${c.new_files.map(f => fileCard(f, c)).join("")}</div>`);
+  if (c.announcements.length)
+    block.push(`<h4>📢 公告 <em>${c.announcements.length}</em></h4>
+      <ul class="ann">${c.announcements.map(a => `<li>
+        ${a.url ? `<a href="${esc(a.url)}" target="_blank" rel="noopener">${esc(a.title)}</a>`
+                : `<strong>${esc(a.title)}</strong>`}
+        <span class="atext">（${esc(a.created_at)}）${esc(a.summary)}…</span></li>`).join("")}</ul>`);
+
+  const badges = [];
+  if (c.new_assignments.length) badges.push(`<span class="pill new">${c.new_assignments.length} 新任务</span>`);
+  if (c.upcoming.length) badges.push(`<span class="pill upd">${c.upcoming.length} 待办</span>`);
+  if (c.new_files.length) badges.push(`<span class="pill">${c.new_files.length} 新资料</span>`);
+
+  return `<details class="course" ${open ? "open" : ""}>
+    <summary>
+      <span>
+        <div class="cname">${esc(c.name)}</div>
+        <div class="ccode">${esc(c.code || "")}${c.term ? " · " + esc(c.term) : ""}</div>
+      </span>
+      <span class="badges">${badges.join("")}<span class="caret">▶</span></span>
+    </summary>
+    <div class="body">${block.join("")}
+      ${c.url ? `<a class="course-link" href="${esc(c.url)}" target="_blank" rel="noopener">在 Canvas 中打开该课程 ↗</a>` : ""}
+    </div>
+  </details>`;
+}
+
+/* ================= 主渲染 ================= */
+let DATA = { weeks: [] }, SEL = 0, Q = "";
+
+function weeksSorted() {
+  return (DATA.weeks || []).slice().sort((a, b) => (a.date < b.date ? 1 : -1));
+}
+
+function renderWeekNav() {
+  const ws = weeksSorted();
+  $("week-nav").innerHTML = ws.map((w, i) =>
+    `<button class="wchip" data-i="${i}" aria-current="${i === SEL}">
+       ${i === 0 ? "最新 · " : ""}${esc(w.date)}
+     </button>`).join("");
+  $("week-nav").querySelectorAll(".wchip").forEach(b =>
+    b.onclick = () => { SEL = +b.dataset.i; render(); });
+}
+
+function allTodo(w) {
+  const map = new Map();
+  (w.courses || []).forEach(c => {
+    const add = (a, tag) => {
+      const key = (a.url || "") + "|" + a.name;
+      if (map.has(key)) return;
+      map.set(key, Object.assign({}, a, { course: c.name, curl: c.url, tag }));
+    };
+    c.upcoming.forEach(a => add(a, "即将截止"));
+    c.new_assignments.forEach(a => {
+      const iso = a.due_iso;
+      if (iso && new Date(iso).getTime() > Date.now()) add(a, "新布置");
+    });
+  });
+  return [...map.values()].sort((x, y) => {
+    const gx = x.due_iso ? new Date(x.due_iso).getTime() : Infinity;
+    const gy = y.due_iso ? new Date(y.due_iso).getTime() : Infinity;
+    return gx - gy;
+  });
+}
+
+function render() {
+  const ws = weeksSorted();
+  if (!ws.length) { renderEmptySite(); return; }
+  if (SEL >= ws.length) SEL = 0;
+  const w = ws[SEL];
+  renderWeekNav();
+  $("updated").textContent = "最近更新：" + (DATA.updated_at || w.generated_at || "—");
+  $("tz-label").textContent = DATA.tz_label || "UTC+8";
+  $("range").textContent = "统计范围 " + (w.range || "过去 7 天");
+
+  const cn = (k) => (w.courses || []).reduce((s, c) => s + c[k].length, 0);
+  const todo = allTodo(w);
+  const nums = [["课程", (w.courses || []).length, 0], ["新任务", cn("new_assignments"), 0],
+                ["待办", todo.length, todo.length ? 1 : 0], ["新资料", cn("new_files"), 0],
+                ["公告", cn("announcements"), 0]];
+  $("stats").innerHTML = nums.map(([label, n, hot]) =>
+    `<div class="stat${hot ? " hot" : ""}"><b>${n}</b><span>${label}</span></div>`).join("");
+
+  $("todo-cnt").textContent = todo.length ? todo.length + " 项" : "";
+  $("todo").innerHTML = todo.length
+    ? todo.map(a => {
+        const d = due(a.due_iso, a.due_at);
+        return `<div class="row">
+          <span class="ico">${d.cls === "urgent" ? "🔴" : d.cls === "soon" ? "🟠" : d.cls === "over" ? "⚪" : "🟢"}</span>
+          <span class="grow">
+            <a href="${esc(a.url)}" target="_blank" rel="noopener">${esc(a.name)}</a>
+            <span class="sub">${esc(a.course)}${a.points !== null && a.points !== undefined ? " · " + a.points + " 分" : ""}</span>
+          </span>
+          <span class="tail"><span class="due ${d.cls}">${esc(d.when)}${d.label ? `<span>${d.label}</span>` : ""}</span></span>
+        </div>`;
+      }).join("")
+    : `<div class="good">未来 7 天没有临近的截止任务，可以安心复习本周新资料 👍</div>`;
+
+  const fresh = [];
+  (w.courses || []).forEach(c => c.new_assignments.forEach(a => fresh.push({ a, c })));
+  fresh.sort((x, y) => {
+    const gx = x.a.due_iso ? new Date(x.a.due_iso).getTime() : Infinity;
+    const gy = y.a.due_iso ? new Date(y.a.due_iso).getTime() : Infinity;
+    return gx - gy;
+  });
+  $("fresh-cnt").textContent = fresh.length ? fresh.length + " 项" : "";
+  $("fresh").innerHTML = fresh.length
+    ? fresh.map(({ a, c }) => {
+        const d = due(a.due_iso, a.due_at);
+        return `<div class="row">
+          <span class="ico" title="${esc(a.kind || "")}">${KIND_ICON[a.kind] || "📌"}</span>
+          <span class="grow">
+            <a href="${esc(a.url)}" target="_blank" rel="noopener">${esc(a.name)}</a>
+            <span class="sub">${esc(c.name)}${a.points !== null && a.points !== undefined ? " · " + a.points + " 分" : ""}</span>
+          </span>
+          <span class="tail"><span class="due ${d.cls}">${esc(d.when)}${d.label ? `<span>${d.label}</span>` : ""}</span></span>
+        </div>`;
+      }).join("")
+    : `<div class="empty">本周没有新布置的任务。</div>`;
+
+  const act = (w.courses || []).filter(active).sort((a, b) => score(b) - score(a));
+  const quiet = (w.courses || []).filter(c => !active(c));
+  $("courses").innerHTML = act.length
+    ? act.map((c, i) => courseCard(c, i < 2)).join("")
+    : `<div class="panel empty">本周所有课程都没有新动态。</div>`;
+  $("quiet-cnt").textContent = quiet.length ? quiet.length + " 门" : "";
+  $("quiet-panel").style.display = quiet.length ? "" : "none";
+  $("quiet").innerHTML = quiet.map(c =>
+    `<span class="qchip">${esc(c.name)}</span>`).join("");
+}
+
+function renderSearch(q) {
+  const key = q.toLowerCase();
+  const hits = { assign: [], file: [], ann: [] };
+  weeksSorted().forEach((w, wi) => {
+    (w.courses || []).forEach(c => {
+      c.new_assignments.forEach(a => {
+        if ((a.name || "").toLowerCase().includes(key)) hits.assign.push({ a, c, w, wi });
+      });
+      c.new_files.forEach(f => {
+        if ((f.name || "").toLowerCase().includes(key)) hits.file.push({ f, c, w });
+      });
+      c.announcements.forEach(x => {
+        if (((x.title || "") + (x.summary || "")).toLowerCase().includes(key)) hits.ann.push({ x, c, w });
+      });
+    });
+  });
+  const total = hits.assign.length + hits.file.length + hits.ann.length;
+  const cap = s => `<div class="panel"><h2>${s}</h2><div class="hint">搜索「${esc(q)}」· 跨全部周报归档</div>`;
+  const out = [];
+  out.push(cap(total ? `🔍 找到 ${total} 条结果` : `🔍 没有找到「${esc(q)}」`));
+  if (hits.assign.length) {
+    out.push(`<h4 style="font-size:.85rem;color:var(--brand);margin:10px 0 2px">作业 / 任务</h4>`);
+    out.push(hits.assign.map(({ a, c, w }) => {
+      const d = due(a.due_iso, a.due_at);
+      return `<div class="row"><span class="ico">${KIND_ICON[a.kind] || "📌"}</span>
+        <span class="grow"><a href="${esc(a.url)}" target="_blank" rel="noopener">${esc(a.name)}</a>
+        <span class="sub">${esc(c.name)} · <span class="hit-week">周报 ${esc(w.date)}</span></span></span>
+        <span class="tail"><span class="due ${d.cls}">${esc(d.when)}${d.label ? `<span>${d.label}</span>` : ""}</span></span></div>`;
+    }).join(""));
+  }
+  if (hits.file.length) {
+    out.push(`<h4 style="font-size:.85rem;color:var(--brand);margin:14px 0 2px">资料</h4>`);
+    out.push(`<div class="files">${hits.file.map(({ f, c, w }) =>
+      `<span style="display:block">${fileCard(f, c)}<span class="hit-week" style="margin-left:4px">${esc(c.name)} · 周报 ${esc(w.date)}</span></span>`).join("")}</div>`);
+  }
+  if (hits.ann.length) {
+    out.push(`<h4 style="font-size:.85rem;color:var(--brand);margin:14px 0 2px">公告</h4>`);
+    out.push(`<ul class="ann">${hits.ann.map(({ x, c, w }) => `<li>
+      ${x.url ? `<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.title)}</a>` : `<strong>${esc(x.title)}</strong>`}
+      <span class="atext">（${esc(x.created_at)} · ${esc(c.name)} · 周报 ${esc(w.date)}）${esc(x.summary)}…</span></li>`).join("")}</ul>`);
+  }
+  out.push(`</div>`);
+  $("week-nav").style.display = "none";
+  ["stats", "todo-panel", "fresh-panel", "courses", "quiet-panel"].forEach(id => $(id).style.display = "none");
+  const box = $("search-results");
+  box.style.display = "";
+  box.innerHTML = out.join("");
+}
+
+function renderEmptySite() {
+  $("stats").innerHTML = "";
+  $("todo").innerHTML = `<div class="empty">暂无数据。</div>`;
+  $("fresh").innerHTML = `<div class="empty">暂无数据。</div>`;
+  $("courses").innerHTML = `<div class="panel empty">暂无周报数据。首次自动化运行后（需先在 canvas_config.json 配置 Canvas Token）这里会显示课程动态。</div>`;
+  $("quiet-panel").style.display = "none";
+}
+
+/* ================= 交互 ================= */
+$("q").addEventListener("input", e => {
+  Q = e.target.value.trim();
+  if (Q) renderSearch(Q);
+  else {
+    $("search-results").style.display = "none";
+    $("week-nav").style.display = "";
+    ["stats", "todo-panel", "fresh-panel", "courses", "quiet-panel"].forEach(id => $(id).style.display = "");
+    render();
+  }
+});
+
+const THEME_KEY = "canvas-hub-theme";
+function setTheme(t) {
+  document.documentElement.setAttribute("data-theme", t);
+  $("theme").textContent = t === "dark" ? "☀️" : "🌙";
+  try { localStorage.setItem(THEME_KEY, t); } catch (e) {}
+}
+$("theme").onclick = () =>
+  setTheme(document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark");
+(function initTheme() {
+  let t = null;
+  const p = new URLSearchParams(location.search).get("theme");
+  if (p === "dark" || p === "light") t = p;          // 支持 ?theme=dark 手动指定
+  if (!t) { try { t = localStorage.getItem(THEME_KEY); } catch (e) {} }
+  if (!t) t = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  setTheme(t);
+})();
+
+/* ================= 启动 ================= */
+const box = document.createElement("section");
+box.id = "search-results";
+box.style.display = "none";
+$("quiet-panel").after(box);
+
+fetch("data.json", { cache: "no-store" })
+  .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+  .then(d => {
+    DATA = d || { weeks: [] };
+    if (DATA.canvas_url) $("canvas-link").href = DATA.canvas_url;
+    render();
+  })
+  .catch(() => {
+    $("updated").textContent = "无法加载 data.json";
+    $("courses").innerHTML = `<div class="panel empty">
+      无法加载 data.json。若你是直接以文件方式打开本页属正常现象，请通过 GitHub Pages 访问。</div>`;
+  });
+</script>
+</body>
+</html>
