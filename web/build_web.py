@@ -24,10 +24,10 @@ def replace_once(html, old, new):
 # 1) 注入设置浮层样式
 OVERLAY_CSS = """
   /* ---- 网页版设置浮层（build_web.py 注入） ---- */
-  #setup-overlay { position: fixed; inset: 0; background: rgba(15,20,28,.62);
+  #setup-overlay { position: fixed; inset: 0; background: rgba(8,12,20,.8);
     z-index: 50; display: flex; align-items: flex-start; justify-content: center;
     padding: 40px 14px; overflow: auto; }
-  #setup-overlay .modal { background: var(--card); color: var(--ink); border: 1px solid var(--line);
+  #setup-overlay .modal { background: var(--panel); color: var(--ink); border: 1px solid var(--line);
     border-radius: 16px; width: 100%; max-width: 760px; padding: 20px 22px;
     box-shadow: 0 18px 50px rgba(0,0,0,.35); }
   #setup-overlay h3 { font-size: 1.1rem; margin-bottom: 4px; }
