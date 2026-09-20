@@ -4,7 +4,7 @@
 
 定时抓取你在 Canvas 上的全部课程动态：新作业、未提交任务、老师改的截止时间、新上传的 PPT、新公告，汇总成周报与一个属于你的学习看板。**算法公开，数据私有**——你的课程信息只留在你自己的电脑上，本仓库不含任何人的凭证与数据。
 
-## 🚀 三种用法，按需选择
+## 🚀 两种用法，按需选择
 
 ### 🌐 网页版（推荐 · 零安装 · 手机可用）
 
@@ -26,19 +26,10 @@ git clone https://github.com/Famalhaut04/canvas-weekly-hub.git
 按 **[部署指南](docs/部署指南.md)** 配置令牌，然后把每周定时任务导入你的 agent，之后每周五晚自动抓取并**用中文向你汇报**。
 功能最全：可同时更新本地看板、备份到你的私有仓库、生成单文件看板与 ICS 日历。
 
-### 🅱️ 如若没有 AI agent，则可以直接下载软件包进行使用（进阶版）
+> 没有桌面安装包：网页版已覆盖核心场景；如需「定时自动运行 + 课件自动下载到本地」的离线能力，
+> 克隆仓库后按部署指南用 Windows 计划任务运行抓取脚本（需 Python）即可实现。
 
-**👉 [下载 CityU-Canvas-Assistant-v1.1.0.exe](https://github.com/Famalhaut04/canvas-weekly-hub/releases/latest)**（Windows，约 12 MB，**无需安装 Python**）
-
-双击运行 → 像安装普通软件一样走四步向导（选保存位置 → 粘贴令牌 → 设定时推送 → 完成）。之后每周到点自动抓取，并生成**双击即开的「我的学习网站.html」**。额外能力：**课件自动下载到本地、定时自动运行**。
-
-![软件主界面](docs/screenshots/app-main.png)
-
-完整说明见 **[安装包使用手册](docs/安装包使用手册.md)**。
-
-> 三种方式数据格式完全一致，随时可以互换。
-
-> 两条路径用的是同一个抓取引擎，数据格式完全一致，随时可以互相切换。
+> 两种方式数据格式完全一致，随时可以互换。
 
 
 ## ✨ 功能
@@ -56,7 +47,6 @@ git clone https://github.com/Famalhaut04/canvas-weekly-hub.git
 - 🌗 **深色模式**：跟随系统，亦可手动切换
 - 📄 **本地周报**：每次生成 markdown 文件存档，方便复习
 - 📦 **单文件看板**：生成一个自包含的 HTML，双击即开，无需服务器、可拷到手机看
-- 🖥 **图形界面**（方式 B）：不用命令行，填写即可用，自动注册 Windows 定时任务
 - 🤖 **AI 汇报**（方式 A）：配合 ZCode 自动化任务，每周五晚用中文向你汇报本周要点
 
 ## 🔧 工作原理
@@ -89,12 +79,10 @@ git clone https://github.com/Famalhaut04/canvas-weekly-hub.git
 
 ```
 canvas_weekly_report.py      # 抓取引擎：拉 Canvas 数据 → 周报 → 看板 → 日历（命令行）
-app/cityu_canvas_assistant.py # 图形界面小软件（方式 B）：配置、测连接、注册定时任务
 site-template/index.html     # 学习看板首页模板（单文件，无构建依赖）
 config/canvas_config.example.json   # 配置模板（Token 留空，由你自己填写）
 config/data.template.json    # 看板初始空数据文件
 docs/部署指南.md              # 方式 A：从零跑通的完整教程（含导入 agent 定时任务）
-docs/安装包使用手册.md         # 方式 B：安装包版使用说明（面向非技术同学）
 docs/screenshots/            # 界面截图
 ```
 
