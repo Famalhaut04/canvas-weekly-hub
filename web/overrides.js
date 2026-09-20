@@ -455,3 +455,25 @@ $("ics-link").addEventListener("click", (e) => {
 });
 
 window.__HUB_BOOT__ && window.__HUB_BOOT__();
+
+/* ---------------- Star 数展示（缓存 1 小时，失败静默） ---------------- */
+(async () => {
+  try {
+    let n = null, t = 0;
+    try {
+      const j = JSON.parse(HUB_STORE.get("hubStars") || "null");
+      if (j) { n = j.n; t = j.t || 0; }
+    } catch (e) {}
+    if (!n || Date.now() - t > 3600000) {
+      const r = await fetch("https://api.github.com/repos/Famalhaut04/canvas-weekly-hub");
+      if (r.ok) {
+        n = (await r.json()).stargazers_count;
+        HUB_STORE.set("hubStars", JSON.stringify({ n, t: Date.now() }));
+      }
+    }
+    if (n !== null && n !== undefined) {
+      const el = document.getElementById("star-count");
+      if (el) el.textContent = " " + n;
+    }
+  } catch (e) { /* 离线或限流时静默 */ }
+})();

@@ -1,5 +1,7 @@
 # Canvas Weekly Hub 🎓
 
+[![GitHub Stars](https://img.shields.io/github/stars/Famalhaut04/canvas-weekly-hub?style=social&label=%E2%AD%90+Star)](https://github.com/Famalhaut04/canvas-weekly-hub/stargazers)
+
 **城大 Canvas 课程助手** —— 为**香港城市大学（CityU）学生**打造的全自动 Canvas 课程周报与学习看板，基于 [Canvas LMS](https://www.instructure.com/canvas) API，同样兼容其他使用 Canvas 的学校。
 
 定时抓取你在 Canvas 上的全部课程动态：新作业、未提交任务、老师改的截止时间、新上传的 PPT、新公告，汇总成周报与一个属于你的学习看板。**算法公开，数据私有**——你的课程信息只留在你自己的电脑上，本仓库不含任何人的凭证与数据。

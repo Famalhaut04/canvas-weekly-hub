@@ -45,6 +45,11 @@
   .icon-btn { background: rgba(255,255,255,.16); border: 1px solid rgba(255,255,255,.25);
               color: #fff; border-radius: 999px; width: 34px; height: 34px; line-height: 1; }
   .icon-btn:hover { background: rgba(255,255,255,.28); }
+  .star-link { display: inline-flex; align-items: center; gap: 4px; background: rgba(255,255,255,.16);
+    border: 1px solid rgba(255,255,255,.28); border-radius: 999px; padding: 6px 12px;
+    color: #fff; text-decoration: none; font-size: .82rem; font-weight: 600; }
+  .star-link:hover { background: rgba(255,255,255,.3); }
+  .star-link span { font-weight: 400; opacity: .9; }
   .meta { max-width: 1060px; margin: 0 auto; padding: 0 18px 12px; font-size: .8rem;
           color: rgba(255,255,255,.85); display: flex; gap: 10px; flex-wrap: wrap; }
   .meta i { font-style: normal; opacity: .55; }
@@ -165,6 +170,8 @@
     </label>
     <a id="canvas-link" class="icon-btn" title="打开 Canvas" target="_blank" rel="noopener"
        style="display:grid;place-items:center;text-decoration:none">🎓</a>
+    <a id="star-btn" class="star-link" href="https://github.com/Famalhaut04/canvas-weekly-hub"
+       target="_blank" rel="noopener" title="去 GitHub 点个 Star ⭐ 支持一下">⭐ Star<span id="star-count"></span></a>
     <button id="theme" class="icon-btn" title="切换深色 / 浅色">🌙</button>
   </div>
   <div class="meta">
@@ -199,7 +206,9 @@
 </main>
 
 <footer>
-  每周五 19:00 由自动化任务抓取 Canvas 并推送 · 托管于 GitHub Pages
+  每周五 19:00 由自动化任务抓取 Canvas 并推送 · 托管于 GitHub Pages<br>
+  觉得好用？去 <a href="https://github.com/Famalhaut04/canvas-weekly-hub" target="_blank" rel="noopener">GitHub</a>
+  点个 <a href="https://github.com/Famalhaut04/canvas-weekly-hub/stargazers" target="_blank" rel="noopener">⭐ Star</a> 支持一下
 </footer>
 
 <script>
