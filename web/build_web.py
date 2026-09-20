@@ -46,6 +46,12 @@ OVERLAY_CSS = """
   .subbox { background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px;
     padding: 10px 12px; margin-top: 8px; }
   .subbox code { font-size: .78rem; word-break: break-all; color: var(--brand-2); }
+  .fstep { border-top: 1px solid var(--line); margin-top: 14px; padding-top: 12px; }
+  .fstep-h { font-weight: 700; font-size: .95rem; margin-bottom: 6px; }
+  details.faq { margin-top: 6px; border: 1px solid var(--line); border-radius: 8px;
+    padding: 6px 10px; background: var(--panel-2); font-size: .85rem; }
+  details.faq summary { cursor: pointer; color: var(--brand-2); font-weight: 600; }
+  details.faq p { margin: 6px 0; }
 </style>"""
 html = replace_once(tpl, "  .pill.upd { background: var(--soon-bg); color: var(--soon); }"
                         "\n  .pill.sub-ok { background: var(--far-bg); color: var(--far); }"

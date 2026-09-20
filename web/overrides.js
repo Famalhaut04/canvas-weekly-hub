@@ -320,38 +320,87 @@ function showSetup() {
   const cfg = hubCfg();
   ov.innerHTML = `
   <div class="modal">
-    <h3>⚙️ 设置 · 连接你的 Canvas</h3>
-    <p class="hint">数据只保存在你自己的浏览器里（localStorage），不会上传到任何服务器。
-       浏览器无法直连 Canvas（学校未开放跨域），需要先部署一个只属于你的转发代理。</p>
-    <div class="frow"><label>① 转发代理</label>
-      <input id="s-worker" placeholder="https://你的子域.workers.dev">
-      <a href="https://deploy.workers.cloudflare.com/?url=https://github.com/Famalhaut04/canvas-weekly-hub"
-         target="_blank" rel="noopener">一键部署（免费，约2分钟）↗</a>
-      <a href="https://github.com/Famalhaut04/canvas-weekly-hub/blob/main/docs/Cloudflare%E9%83%A8%E7%BD%B2%E5%9B%BE%E6%96%87%E6%95%99%E7%A8%8B.md"
-         target="_blank" rel="noopener" title="零基础手把手：注册 Cloudflare → 一键部署 → 备用方案 → 英文按钮对照表">📖 手把手图文教程</a>
+    <div style="display:flex;align-items:center;gap:8px">
+      <h3 style="flex:1">⚙️ 首次使用 · 三步完成（约 5 分钟，全程只用鼠标）</h3>
+      <a class="btn" href="https://github.com/Famalhaut04/canvas-weekly-hub/blob/main/docs/Cloudflare%E9%83%A8%E7%BD%B2%E5%9B%BE%E6%96%87%E6%95%99%E7%A8%8B.md"
+         target="_blank" rel="noopener">📖 图文教程</a>
+      <button class="btn" id="s-close">✕</button>
     </div>
-    <p class="hint">点上方链接 → 登录 Cloudflare → 点 Deploy → 把给你的 .workers.dev 地址填到左边。
-       部署后令牌只经过你自己的 Cloudflare，不经过任何人。</p>
-    <div class="frow"><label>② Canvas 地址</label><input id="s-canvas" placeholder="https://canvas.cityu.edu.hk"></div>
-    <div class="frow"><label>③ 访问令牌</label><input id="s-token" type="password"
-      placeholder="Canvas → 账户 → 设置 → + 新访问令牌（只显示一次）"></div>
-    <div class="frow"><label>④ 令牌到期日</label><input id="s-exp" placeholder="YYYY-MM-DD，剩5天会在页面提醒"></div>
-    <div class="frow"><label>⑤ Server酱 SendKey</label><input id="s-sendkey" type="password"
-      placeholder="可选：微信每日提醒（sct.ftqq.com 免费获取）"></div>
-    <div class="bar">
-      <button class="btn" id="s-test">🔌 测试连接</button>
-      <button class="btn primary" id="s-fetch">🚀 抓取并生成看板</button>
-      <button class="btn" id="s-sub">📅 启用日历订阅 / 微信提醒</button>
-      <button class="btn" id="s-close">关闭</button>
+
+    <div class="fstep">
+      <div class="fstep-h">❶ 获取你的「传话小助手」（免费 · 约 2 分钟）</div>
+      <p class="hint">学校禁止网页直接访问 Canvas，所以需要一个<b>只属于你的免费小助手</b>帮你转发数据。
+      点下面的按钮 → 用<b>邮箱</b>注册/登录 Cloudflare（页面还会要求登录 GitHub，没有账号就免费注册一个）→
+      点 <b>Create and Deploy</b> → 复制它给你的 <code>.workers.dev</code> 网址填到下面：</p>
+      <div class="frow">
+        <a class="btn primary" href="https://deploy.workers.cloudflare.com/?url=https://github.com/Famalhaut04/canvas-weekly-hub"
+           target="_blank" rel="noopener">🚀 一键部署我的小助手 ↗</a>
+        <a href="https://github.com/Famalhaut04/canvas-weekly-hub/blob/main/docs/Cloudflare%E9%83%A8%E7%BD%B2%E5%9B%BE%E6%96%87%E6%95%99%E7%A8%8B.md"
+           target="_blank" rel="noopener">📖 手把手图文教程（每一步鼠标点哪都写了）</a>
+      </div>
+      <div class="frow"><label>小助手地址</label>
+        <input id="s-worker" placeholder="https://canvas-weekly-hub.你的子域.workers.dev"></div>
+      <details class="faq"><summary>一键部署打不开？用备用方法（同样不写代码）</summary>
+        <p class="hint">1) 打开 <a href="https://dash.cloudflare.com" target="_blank" rel="noopener">dash.cloudflare.com</a> 并登录；
+        2) 左侧 <b>Workers &amp; Pages</b> → <b>Create application</b> → <b>Create Worker</b> → 名字随意（如 canvas）→ 点 <b>Deploy</b>；
+        3) 点 <b>Edit code</b>，清空默认代码，粘贴 <a href="https://raw.githubusercontent.com/Famalhaut04/canvas-weekly-hub/main/worker.js" target="_blank" rel="noopener">这个网址里的全部代码</a>，点右上 <b>Deploy</b>；
+        4) 你的小助手地址就是 <code>https://名字.你的子域.workers.dev</code>。
+        此方式看板功能完整；「日历订阅 / 微信提醒」两个附加功能需要用上面的一键部署。</p>
+      </details>
+    </div>
+
+    <div class="fstep">
+      <div class="fstep-h">❷ 绑定你的 Canvas 令牌（约 1 分钟）</div>
+      <div class="frow"><label>Canvas 地址</label><input id="s-canvas" placeholder="https://canvas.cityu.edu.hk"></div>
+      <div class="frow"><label>访问令牌</label><input id="s-token" type="password"
+        placeholder="登录 Canvas 后生成，获取方法点下面的折叠说明"></div>
+      <details class="faq"><summary>❓ 如何获取令牌？（约 1 分钟，只在第一次需要）</summary>
+        <p class="hint">1) 浏览器登录 <a href="https://canvas.cityu.edu.hk" target="_blank" rel="noopener">canvas.cityu.edu.hk</a>；
+        2) 左下角 <b>账户(Account) → 设置(Settings)</b>；
+        3) 拉到页面最底部「已批准的集成」→ 点 <b>+ 新访问令牌</b>；
+        4) 目的随便填（如 weekly-report），点 <b>生成</b> → <b>立刻复制</b>（只显示这一次）粘贴到上面；
+        5) 城大令牌最长 90 天——把生成页显示的到期日填到下面④，<b>剩 5 天会自动提醒你更换</b>。</p>
+      </details>
+      <div class="frow"><label>令牌到期日</label><input id="s-exp" placeholder="YYYY-MM-DD，选填但强烈建议填写"></div>
+      <div class="frow"><label></label>
+        <button class="btn primary" id="s-test">🔌 测试连接</button>
+        <span style="font-size:.8rem;color:var(--muted)">显示 ✅ 后再进行第 ❸ 步</span>
+      </div>
+      <div class="status" id="s-status"></div>
+    </div>
+
+    <div class="fstep">
+      <div class="fstep-h">❸ 生成看板 &amp; 开启提醒</div>
+      <div class="frow"><label></label>
+        <button class="btn primary" id="s-fetch">🚀 抓取并生成看板</button>
+        <span style="font-size:.8rem;color:var(--muted)">抓完会自动打开你的看板</span>
+      </div>
+      <div class="frow"><label></label>
+        <button class="btn" id="s-sub">📅 启用日历订阅 / 微信提醒</button>
+        <span style="font-size:.8rem;color:var(--muted)">手机日历自动提醒截止；微信每天 18:30 推送待办</span>
+      </div>
+      <div class="frow"><label>微信 SendKey</label><input id="s-sendkey" type="password"
+        placeholder="可选，在 sct.ftqq.com 免费获取"></div>
+      <div class="subbox" id="s-subbox" style="display:none">
+        <div>✅ 已启用。把下面的链接添加到手机日历（订阅一次，永久自动更新）：</div>
+        <code id="s-icsurl"></code>
+        <button class="btn" id="s-copy" style="margin-top:6px">复制链接</button>
+      </div>
+    </div>
+
+    <details class="faq" style="margin:10px 18px 0"><summary>❓ 常见问题</summary>
+      <p class="hint">
+      <b>Failed to fetch</b>：小助手地址填错或还没部署完成 → 回到①检查；<br>
+      <b>HTTP 401</b>：令牌错误或过期 → 到 Canvas 重新生成并粘贴；<br>
+      <b>显示 0 门课程</b>：确认 Canvas 地址是 canvas.cityu.edu.hk；<br>
+      <b>清除浏览器缓存后要重新粘贴令牌</b>：正常现象，数据可重新抓取，建议常点「⬇️ 下载我的学习网站」留离线备份。</p>
+    </details>
+
+    <div style="display:flex;justify-content:space-between;margin-top:12px">
       <button class="btn" id="s-clear" style="color:#c0392b">清除我的数据</button>
+      <button class="btn" id="s-close2">关闭</button>
     </div>
-    <div class="subbox" id="s-subbox" style="display:none">
-      <div>✅ 订阅已启用。把下面的链接添加到手机日历（订阅一次，永久自动更新）：</div>
-      <code id="s-icsurl"></code>
-      <button class="btn" id="s-copy" style="margin-top:6px">复制链接</button>
-    </div>
-    <div class="status" id="s-status"></div>
-  </div>`;
+  </div>`;;
   document.body.appendChild(ov);
 
   $("s-worker").value = cfg.worker;
@@ -368,6 +417,7 @@ function showSetup() {
   const S_WARN = "#c0392b", S_OK = "#0f8a4f";
 
   $("s-close").onclick = () => { ov.style.display = "none"; };
+  $("s-close2").onclick = () => { ov.style.display = "none"; };
   $("s-test").onclick = async () => {
     saveSetup();
     const c = hubCfg();
