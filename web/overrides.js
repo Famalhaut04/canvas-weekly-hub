@@ -370,7 +370,7 @@ function showSetup() {
       <div class="frow"><label>访问令牌</label><input id="s-token" type="password"
         placeholder="登录 Canvas 后生成，获取方法点下面的折叠说明"></div>
       <details class="faq"><summary>❓ 如何获取令牌？（约 1 分钟，只在第一次需要）</summary>
-        <p class="hint">1) 浏览器登录 <a href="https://canvas.cityu.edu.hk" target="_blank" rel="noopener">canvas.cityu.edu.hk</a>；
+        <p class="hint">1) 登录 Canvas（<a href="https://canvas.cityu.edu.hk/profile/settings" target="_blank" rel="noopener">直达令牌生成页 ↗</a>，如提示登录先用学校账号登录）；
         2) 左下角 <b>账户(Account) → 设置(Settings)</b>；
         3) 拉到页面最底部「已批准的集成」→ 点 <b>+ 新访问令牌</b>；
         4) 目的随便填（如 weekly-report），点 <b>生成</b> → <b>立刻复制</b>（只显示这一次）粘贴到上面；
@@ -452,6 +452,7 @@ function showSetup() {
       const data = await fetchAll();
       status("✅ 完成：" + data.weeks[0].courses.length + " 门课程已生成看板");
       boot(data);
+      showFirstTip();
       setTimeout(() => { ov.style.display = "none"; }, 600);
     } catch (e) { status("❌ " + e.message, S_WARN); }
   };
@@ -476,6 +477,40 @@ function showSetup() {
              (c.sendkey ? "微信每日提醒已就绪（Worker Cron 每天 18:30 推送）" : "如需微信提醒，填写 Server酱 SendKey 后再点一次本按钮"));
     } catch (e) { status("❌ " + e.message, S_WARN); }
   };
+  // 小助手地址即时连通性检测（输完 0.7 秒自动检查，当场发现填错）
+  const wkInp = $("s-worker");
+  if (!document.getElementById("worker-check")) {
+    const wkSpan = document.createElement("span");
+    wkSpan.id = "worker-check";
+    wkSpan.style.cssText = "font-size:.78rem;margin-left:6px;white-space:nowrap";
+    wkInp.parentElement.appendChild(wkSpan);
+    let wkTimer = null;
+    const wkRun = async () => {
+      const v = wkInp.value.trim();
+      const el = $("worker-check");
+      if (!v) { el.textContent = ""; return; }
+      if (!/^https:\/\/.+\.workers\.dev\/?$/.test(v)) {
+        el.style.color = S_WARN;
+        el.textContent = "⚠️ 地址应以 https:// 开头、以 .workers.dev 结尾";
+        return;
+      }
+      el.style.color = ""; el.textContent = "⏳ 正在检查…";
+      try {
+        const r = await fetch(v.replace(/\/+$/, "") + "/");
+        const j = await r.json().catch(() => null);
+        if (j && j.name && String(j.name).includes("canvas-weekly-hub")) {
+          el.style.color = S_OK; el.textContent = "✅ 小助手在线";
+        } else {
+          el.style.color = S_WARN; el.textContent = "⚠️ 能连上但不是本项目的代码：回 Cloudflare 确认已粘贴";
+        }
+      } catch (e) {
+        el.style.color = S_WARN; el.textContent = "❌ 连不上：检查地址拼写，或部署还没完成";
+      }
+    };
+    wkInp.addEventListener("input", () => { clearTimeout(wkTimer); wkTimer = setTimeout(wkRun, 700); });
+    if (wkInp.value) wkRun();
+  }
+
   $("s-copycode").onclick = async () => {
     try {
       const r = await fetch("https://raw.githubusercontent.com/Famalhaut04/canvas-weekly-hub/main/worker.js");
@@ -519,6 +554,63 @@ function setIcsLink(url) {
   a.target = "_blank";
   a.title = "订阅到手机日历（自动更新）";
 }
+
+/* ---------------- 新手引导条 & 更新按钮 ---------------- */
+function showFirstTip() {
+  if (document.getElementById("first-tip")) return;
+  if (HUB_STORE.get("hubTipDone")) return;
+  const main = document.querySelector("main");
+  if (!main) return;
+  const tip = document.createElement("div");
+  tip.id = "first-tip";
+  tip.innerHTML = `🎉 <b>看板已就绪！</b>常用三件事：
+    ① 每周回来点一次顶部 <b>🔄</b> 更新数据；
+    ② 顶部 <b>📅 截止日历</b> 可导入手机，到点自动提醒；
+    ③ <b>⚙️ 设置</b> 里可下载离线版「我的学习网站.html」和开启微信提醒。
+    <button title="知道了" style="margin-left:auto;flex:none">✕</button>`;
+  tip.querySelector("button").onclick = () => {
+    HUB_STORE.set("hubTipDone", "1");
+    tip.remove();
+  };
+  main.insertBefore(tip, main.firstChild);
+}
+
+const refreshBtn = document.createElement("button");
+refreshBtn.id = "refresh-btn";
+refreshBtn.className = "icon-btn";
+refreshBtn.title = "更新数据：重新抓取 Canvas（约 10 秒）";
+refreshBtn.textContent = "🔄";
+document.getElementById("settings-btn").parentElement.insertBefore(
+  refreshBtn, document.getElementById("settings-btn"));
+refreshBtn.onclick = async () => {
+  const c = hubCfg();
+  if (!c.worker || !c.token) { showSetup(); return; }
+  refreshBtn.textContent = "⏳";
+  refreshBtn.disabled = true;
+  try {
+    const data = await fetchAll();
+    boot(data);
+    showFirstTip();
+  } catch (e) {
+    showSetup();
+    const st = document.getElementById("s-status");
+    if (st) { st.textContent = "❌ " + e.message; st.style.color = "#c0392b"; }
+  } finally {
+    refreshBtn.textContent = "🔄";
+    refreshBtn.disabled = false;
+  }
+};
+
+const _bootRaw = window.__HUB_BOOT__;
+window.__HUB_BOOT__ = function () {
+  _bootRaw();
+  // 数据就绪后补上新手引导条（仅网页版）
+  const has = (() => { try {
+    const d = JSON.parse(HUB_STORE.get("hubData") || "null");
+    return !!(d && d.weeks && d.weeks.length);
+  } catch (e) { return false; } })();
+  if (has) showFirstTip();
+};
 
 /* ---------------- 入口接线 ---------------- */
 

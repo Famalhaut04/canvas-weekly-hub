@@ -52,6 +52,21 @@ OVERLAY_CSS = """
     padding: 6px 10px; background: var(--panel-2); font-size: .85rem; }
   details.faq summary { cursor: pointer; color: var(--brand-2); font-weight: 600; }
   details.faq p { margin: 6px 0; }
+  #first-tip { display: flex; gap: 10px; align-items: flex-start; flex-wrap: wrap;
+    background: var(--panel-2); border: 1px solid var(--line); border-left: 4px solid var(--brand);
+    border-radius: 12px; padding: 10px 14px; margin: 0 0 14px; font-size: .85rem; color: var(--ink); }
+  #first-tip button { background: none; border: 0; cursor: pointer; color: var(--muted);
+    font-size: 1rem; padding: 0 2px; }
+  #first-tip button:hover { color: var(--ink); }
+  @media (max-width: 640px) {
+    #setup-overlay { padding: 12px 8px; }
+    #setup-overlay .modal { padding: 14px 12px; }
+    #setup-overlay .frow { flex-direction: column; align-items: stretch; gap: 4px; }
+    #setup-overlay .frow label { width: auto; }
+    #setup-overlay input { min-width: 0; width: 100%; }
+    #setup-overlay .frow .btn, #setup-overlay .frow a.btn { width: 100%; text-align: center; }
+    #first-tip { font-size: .8rem; }
+  }
 </style>"""
 html = replace_once(tpl, "  .pill.upd { background: var(--soon-bg); color: var(--soon); }"
                         "\n  .pill.sub-ok { background: var(--far-bg); color: var(--far); }"
