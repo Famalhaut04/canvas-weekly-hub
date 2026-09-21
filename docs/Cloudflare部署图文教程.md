@@ -104,6 +104,7 @@
 | 测试连接提示 Failed to fetch | Worker 地址没填对（应以 `https://` 开头、以 `.workers.dev` 结尾），或部署还没完成 |
 | 测试连接提示 HTTP 401 | 是 Canvas 令牌的问题：重新生成令牌并粘贴（与 Cloudflare 无关） |
 | workers.dev 网址在手机流量下打不开 | 部分运营商干扰该域名；手机连家里 WiFi 即可正常，电脑上不受影响 |
+| 页面显示 Latest build failed | GitHub 自动构建失败（不影响手动更新）：按上面「备用方案」的 Edit code 粘贴最新代码并 Deploy，即可完成更新 |
 | 想删除助手 | 打开 https://dash.cloudflare.com → Workers & Pages → 选中 → Settings → Delete；再删除 KV（Storage & Databases → KV）即可，令牌随之消失 |
 
 ---
