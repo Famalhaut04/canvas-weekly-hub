@@ -13,6 +13,9 @@
  */
 
 const CANVAS_HOST_DEFAULT = "canvas.cityu.edu.hk";
+// Instructure/学校边缘防护会拦截"非浏览器"特征请求（403），带上常规浏览器 UA 可显著降低被拦概率
+const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+  "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
 const DAYS_AHEAD = 7;          // 微信提醒覆盖的未来天数
 const ICS_DAYS_AHEAD = 60;     // 日历订阅覆盖的未来天数
 const HK = 8 * 3600;           // 展示时区 UTC+8（秒）
@@ -64,7 +67,8 @@ async function canvasAll(host, token, path, params = {}) {
   for (;;) {
     const qs = new URLSearchParams({ ...params, per_page: "100", page: String(page) });
     const r = await fetch(`${base}?${qs}`, {
-      headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+      headers: { Authorization: `Bearer ${token}`, Accept: "application/json",
+                 "User-Agent": BROWSER_UA },
     });
     if (r.status === 401) throw new Error("令牌无效或已过期（HTTP 401）");
     if (!r.ok) throw new Error(`Canvas API HTTP ${r.status} @ ${path}`);
@@ -222,7 +226,8 @@ async function handleProxy(request, env) {
   const host = request.headers.get("X-Canvas-Host") || env.CANVAS_HOST || CANVAS_HOST_DEFAULT;
   const target = `https://${host}/api/v1/${path}${url.search}`;
   const r = await fetch(target, {
-    headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+    headers: { Authorization: `Bearer ${token}`, Accept: "application/json",
+               "User-Agent": BROWSER_UA },
   });
   return new Response(r.body, {
     status: r.status,

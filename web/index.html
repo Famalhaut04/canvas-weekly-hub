@@ -635,10 +635,22 @@ function workerApi(path, params) {
   return fetch(u + "?" + qs, {
     headers: { "X-Canvas-Token": c.token, "X-Canvas-Host": hostOf(c.canvasUrl) },
   }).then(async (r) => {
+    const body = await r.text();
+    const clean = body.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+    const jsonMsg = (() => { try { const j = JSON.parse(body);
+      return (j.message || (j.errors && j.errors[0] && j.errors[0].message)) || ""; }
+      catch (e) { return ""; } })();
     if (r.status === 401) throw new Error("令牌无效或已过期（HTTP 401）：请到 Canvas 重新生成");
-    if (r.status === 403) throw new Error("Canvas 拒绝访问（HTTP 403）：确认令牌属于你自己");
-    if (!r.ok) throw new Error("Canvas API HTTP " + r.status + " @ " + path);
-    return r.json();
+    if (r.status === 403) {
+      if (/cloudflare|just a moment|attention required|access denied|blocked|rate limit/i.test(body))
+        throw new Error("Canvas 拒绝访问（HTTP 403）：请求被学校/CDN 的防护拦截（疑似屏蔽云服务器访问）。" +
+          "请稍后重试；若反复出现，请把本条提示和你的小助手地址反馈给作者");
+      throw new Error("Canvas 拒绝访问（HTTP 403）：" + (jsonMsg || clean.slice(0, 140) ||
+        "请确认令牌属于你自己；若反复出现请反馈此提示"));
+    }
+    if (!r.ok) throw new Error("Canvas API HTTP " + r.status + (jsonMsg ? "：" + jsonMsg :
+      clean ? "：" + clean.slice(0, 140) : "") + " @ " + path);
+    return JSON.parse(body);
   });
 }
 
