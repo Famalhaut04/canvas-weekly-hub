@@ -340,24 +340,27 @@ function showSetup() {
     </div>
 
     <div class="fstep">
-      <div class="fstep-h">❶ 获取你的「传话小助手」（免费 · 约 2 分钟）</div>
-      <p class="hint">学校禁止网页直接访问 Canvas，所以需要一个<b>只属于你的免费小助手</b>帮你转发数据。
-      点下面的按钮 → 用<b>邮箱</b>注册/登录 Cloudflare（页面还会要求登录 GitHub，没有账号就免费注册一个）→
-      点 <b>Create and Deploy</b> → 复制它给你的 <code>.workers.dev</code> 网址填到下面：</p>
+      <div class="fstep-h">❶ 创建你的「传话小助手」（免费 · 只需一个邮箱 · 约 3 分钟）</div>
+      <p class="hint">学校禁止网页直接访问 Canvas，所以需要一个<b>只属于你的免费小助手</b>帮你转发数据——
+      令牌只经过你自己的账号，不经过任何人。照下面 4 步点，全程不写代码：</p>
+      <p class="hint">
+        1️⃣ 打开 <a href="https://dash.cloudflare.com" target="_blank" rel="noopener">dash.cloudflare.com</a>，用<b>邮箱</b>注册并登录（免费，不用信用卡）；<br>
+        2️⃣ 左侧 <b>Workers &amp; Pages</b> → <b>Create</b> → <b>Create Worker</b> → 名字随意（如 canvas）→ 点 <b>Deploy</b>；<br>
+        3️⃣ 点 <b>Edit code</b> → <b>全选删除</b>默认代码 → 粘贴用下面按钮复制的代码 → 点右上 <b>Deploy</b>；<br>
+        4️⃣ 复制页面显示的 <code>https://名字.你的子域.workers.dev</code>，填到下面输入框。
+      </p>
       <div class="frow">
-        <a class="btn primary" href="https://deploy.workers.cloudflare.com/?url=https://github.com/Famalhaut04/canvas-weekly-hub"
-           target="_blank" rel="noopener">🚀 一键部署我的小助手 ↗</a>
+        <button class="btn primary" id="s-copycode">📋 一键复制小助手代码</button>
         <a href="https://github.com/Famalhaut04/canvas-weekly-hub/blob/main/docs/Cloudflare%E9%83%A8%E7%BD%B2%E5%9B%BE%E6%96%87%E6%95%99%E7%A8%8B.md"
-           target="_blank" rel="noopener">📖 手把手图文教程（每一步鼠标点哪都写了）</a>
+           target="_blank" rel="noopener">📖 卡住了？手把手图文教程</a>
       </div>
       <div class="frow"><label>小助手地址</label>
         <input id="s-worker" placeholder="https://canvas-weekly-hub.你的子域.workers.dev"></div>
-      <details class="faq"><summary>一键部署打不开？用备用方法（同样不写代码）</summary>
-        <p class="hint">1) 打开 <a href="https://dash.cloudflare.com" target="_blank" rel="noopener">dash.cloudflare.com</a> 并登录；
-        2) 左侧 <b>Workers &amp; Pages</b> → <b>Create application</b> → <b>Create Worker</b> → 名字随意（如 canvas）→ 点 <b>Deploy</b>；
-        3) 点 <b>Edit code</b>，清空默认代码，粘贴 <a href="https://raw.githubusercontent.com/Famalhaut04/canvas-weekly-hub/main/worker.js" target="_blank" rel="noopener">这个网址里的全部代码</a>，点右上 <b>Deploy</b>；
-        4) 你的小助手地址就是 <code>https://名字.你的子域.workers.dev</code>。
-        此方式看板功能完整；「日历订阅 / 微信提醒」两个附加功能需要用上面的一键部署。</p>
+      <details class="faq"><summary>更省事的「一键部署」版（需要 GitHub 账号；自动配置提醒功能所需的存储）</summary>
+        <p class="hint">点 <a href="https://deploy.workers.cloudflare.com/?url=https://github.com/Famalhaut04/canvas-weekly-hub"
+        target="_blank" rel="noopener">🚀 一键部署 ↗</a> → 按提示登录 Cloudflare 与 GitHub → 点 <b>Create and Deploy</b> →
+        复制它给的网址填到上面输入框。此方式会自动创建 KV，「日历订阅 / 微信提醒」开箱即用；
+        上面的手动方式看板功能完整，订阅功能需按教程常见问题绑定 KV。</p>
       </details>
     </div>
 
@@ -472,6 +475,18 @@ function showSetup() {
       status("✅ 已启用：把上面链接订阅到手机日历（截止前2小时提醒）；" +
              (c.sendkey ? "微信每日提醒已就绪（Worker Cron 每天 18:30 推送）" : "如需微信提醒，填写 Server酱 SendKey 后再点一次本按钮"));
     } catch (e) { status("❌ " + e.message, S_WARN); }
+  };
+  $("s-copycode").onclick = async () => {
+    try {
+      const r = await fetch("https://raw.githubusercontent.com/Famalhaut04/canvas-weekly-hub/main/worker.js");
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      const code = await r.text();
+      await navigator.clipboard.writeText(code);
+      status("✅ 代码已复制到剪贴板。去 Cloudflare 的 Edit code 里全选粘贴，点右上 Deploy 即可", S_OK);
+    } catch (e) {
+      window.open("https://raw.githubusercontent.com/Famalhaut04/canvas-weekly-hub/main/worker.js", "_blank");
+      status("复制失败（浏览器限制）：已打开代码页，Ctrl+A 全选复制即可", S_WARN);
+    }
   };
   $("s-copy").onclick = () => {
     navigator.clipboard.writeText($("s-icsurl").textContent)
