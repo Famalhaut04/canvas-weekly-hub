@@ -94,6 +94,7 @@ git clone https://github.com/Famalhaut04/canvas-weekly-hub.git
 
 ```
 canvas_weekly_report.py      # 抓取引擎：拉 Canvas 数据 → 周报 → 看板 → 日历（命令行）
+serve_board.py               # 可选：本地看板服务（静态托管 + 页内 🔄 一键刷新接口）
 site-template/index.html     # 学习看板首页模板（单文件，无构建依赖）
 config/canvas_config.example.json   # 配置模板（Token 留空，由你自己填写）
 config/data.template.json    # 看板初始空数据文件
