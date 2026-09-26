@@ -66,6 +66,8 @@ git clone https://github.com/Famalhaut04/canvas-weekly-hub.git
 
 ## 🔧 工作原理
 
+> 📖 **通俗+技术双版本详解：[docs/工作原理.md](docs/工作原理.md)**（数据从哪来/经过哪/存在哪）
+
 ```
              每周定时触发（agent 定时任务 / Windows 计划任务）
                               │
