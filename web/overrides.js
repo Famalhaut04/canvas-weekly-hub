@@ -344,15 +344,15 @@ function showSetup() {
       <p class="hint">学校禁止网页直接访问 Canvas，所以需要一个<b>只属于你的免费小助手</b>帮你转发数据——
       令牌只经过你自己的账号，不经过任何人。照下面 4 步点，全程不写代码：</p>
       <p class="hint">
-        1️⃣ 打开 <a href="https://dash.cloudflare.com" target="_blank" rel="noopener">dash.cloudflare.com</a>，用<b>邮箱</b>注册并登录（免费，不用信用卡）；<br>
-        2️⃣ 左侧 <b>Workers &amp; Pages</b> → <b>Create</b> → <b>Create Worker</b> → 名字随意（如 canvas）→ 点 <b>Deploy</b>；<br>
-        3️⃣ 点 <b>Edit code</b> → <b>全选删除</b>默认代码 → 粘贴用下面按钮复制的代码 → 点右上 <b>Deploy</b>；<br>
-        4️⃣ 复制页面显示的 <code>https://名字.你的子域.workers.dev</code>，填到下面输入框。
+        1️⃣ 打开 <a href="https://dash.cloudflare.com" target="_blank" rel="noopener">dash.cloudflare.com</a>，用<b>邮箱</b>注册（到邮箱点 Verify 验证；随后弹的新手引导/选方案/加域名<b>全部跳过</b>）；<br>
+        2️⃣ 左侧 <b>Compute (Workers)</b>（旧版界面叫 Workers &amp; Pages）→ 右上 <b>Create application</b> → <b>Create Worker</b> → 名字如 canvas → 点 <b>Deploy</b>；<br>
+        3️⃣ 点 <b>Edit code</b> → <b>Ctrl+A 全选</b>后粘贴下面按钮复制的代码（⚠️ 必须替换掉示例的 Hello World，否则会报错）→ 点右上 <b>Deploy</b>；<br>
+        4️⃣ 复制页面上方的 <code>https://名字.你的子域.workers.dev</code> 填到下面——看到 <b>✅ 小助手在线</b> 再继续第❷步。
       </p>
       <div class="frow">
         <button class="btn primary" id="s-copycode">📋 一键复制小助手代码</button>
         <a href="https://github.com/Famalhaut04/canvas-weekly-hub/blob/main/docs/Cloudflare%E9%83%A8%E7%BD%B2%E5%9B%BE%E6%96%87%E6%95%99%E7%A8%8B.md"
-           target="_blank" rel="noopener">📖 卡住了？手把手图文教程</a>
+           target="_blank" rel="noopener">📖 卡住了？零基础分步指南（每步都有完成标志）</a>
       </div>
       <div class="frow"><label>小助手地址</label>
         <input id="s-worker" placeholder="https://canvas-weekly-hub.你的子域.workers.dev"></div>
