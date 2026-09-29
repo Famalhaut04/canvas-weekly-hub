@@ -114,6 +114,8 @@ Cloudflare 是一家国际云计算公司，我们借用它的免费服务安放
 
 **✅ 完成标志**：剪贴板里有了一个 `https://….workers.dev` 网址。
 
+> 🇨🇳 注意：`workers.dev` 域名在**中国大陆网络下常无法直连**（部署显示 success 但浏览器打不开/连不上）。如果你在内地：开代理后操作，或换到香港网络环境再继续——数据抓取走你的浏览器网络，之后在香港使用不受影响。
+
 ---
 
 # 第 3 步：回到课程助手，填两格（约 1 分钟）
@@ -174,6 +176,7 @@ Cloudflare 是一家国际云计算公司，我们借用它的免费服务安放
 | 症状 | 原因 | 解法 |
 |---|---|---|
 | Cloudflare 注册页打不开 | 网络波动 | 刷新重试，或换个浏览器 |
+| 小助手地址显示「❌ 连不上」但部署是 success | **中国大陆网络无法直连 workers.dev**（香港/海外正常） | 开代理后再试；或改在香港网络/校园网环境使用。参考 [Issue #3](https://github.com/Famalhaut04/canvas-weekly-hub/issues/3) |
 | 验证邮件收不到 | 邮箱拦截 | 翻垃圾箱；换 163/Gmail |
 | 控制台里找不到 Workers | 新版导航改名 | 找 **Compute (Workers)** |
 | 测试连接报 Failed to fetch | 小助手地址错 / 未部署完 | 看 3.1 的 ✅ 是否亮 |
@@ -190,14 +193,61 @@ Cloudflare 是一家国际云计算公司，我们借用它的免费服务安放
 2. 页面显示一段代码 → **Ctrl + A** 全选 → **Ctrl + C** 复制
 3. 回 Cloudflare 编辑器 **Ctrl + V** 粘贴
 
-# 附录 B：给 Worker 绑定存储（KV）
+# 附录 B：手动绑定 KV 存储的详细教学
 
-1. Cloudflare 控制台左侧 → **Storage & Databases**（存储与数据库）→ **KV**
-2. 点 **Create namespace**（创建命名空间）→ 名字填 `HUB_KV` → 创建
-3. 回 **Compute (Workers)** → 点你的 Worker → 顶部 **Settings（设置）** 标签
-4. 找到 **Bindings（绑定）** → **Add** → 选 **KV Namespace**
-5. **Variable name（变量名）必须填 `HUB_KV`**（一个字母都不能错）→ KV namespace 选刚建的 → 保存
-6. 回课程助手重新点「📅 启用日历订阅 / 微信提醒」
+> 适用：手动创建的 Worker 启用「日历订阅 / 微信提醒」时提示 KV 相关错误。
+> 全程 2 分钟，共 6 小步，**第 ❺ 步（重新 Deploy）最容易漏——漏了等于没绑**。
+
+## B1. 创建 KV 命名空间（存储空间）
+
+1. Cloudflare 控制台左侧导航 → **Storage & Databases**（存储与数据库）
+   （旧版界面叫 **Workers KV** 或 **Storage & Databases → KV**）
+2. 点 **Create namespace** / **Create**（创建命名空间）
+3. **Namespace name** 填 `HUB_KV`（名字其实随意，但建议照抄，下面选的时候好认）
+4. 点 **Add** / **Create** 完成
+
+**✅ 完成标志**：KV 列表里出现一行 `HUB_KV`，右侧有 ID（一串字母数字）。
+
+## B2. 进入你的 Worker 的设置页
+
+1. 左侧 → **Compute (Workers)** → 点你的 Worker 名字（如 canvas）
+2. 不要点「Edit code」，点 Worker 概览页顶部的 **Settings（设置）** 标签
+
+## B3. 找到 Bindings（绑定）区
+
+在 Settings 页往下滚动，找到 **Bindings（绑定）** 区块（注意：不是「Variables and Secrets / 变量与机密」，那是另一回事）。
+
+- 找不到？新版界面可能在 **Bindings** 区块右上角直接有 **Add** 按钮
+- 还是找不到？把 Settings 页里能看到的小节名称截图发到仓库 Issue，我们帮你指路
+
+## B4. 添加 KV 绑定（两个框千万别填反）
+
+1. 点 **Add** → 选 **KV Namespace**
+2. 出现两个输入项：
+   - **Variable name（变量名）**：必须填 `HUB_KV` —— **一个字母都不能错、不能用小写 hub_kv 以外的写法**，程序靠这个名字找存储
+   - **KV namespace（命名空间）**：下拉选刚才创建的 `HUB_KV`
+3. 点 **Deploy** / **Save**（部署/保存）
+
+**⚠️ 最常见的失败**：变量名填成了命名空间名以外的值（如 `HUB-KV`、`hubKV`、或把两个框填反了）。
+
+## B5. 重新 Deploy（关键！最容易漏的一步）
+
+添加绑定后，Worker 处于「草稿修改」状态——**必须再点一次右上角的 Deploy，绑定才会真正生效**。
+（如果你是从 Edit code 编辑器里改的，同样要点 Deploy。）
+
+**✅ 完成标志**：Settings → Bindings 列表里出现 `HUB_KV`，且页面没有橙色/黄色的"unsaved/未部署"提示。
+
+## B6. 回课程助手重新启用
+
+回课程助手网页 → 设置 → 点「📅 启用日历订阅 / 微信提醒」→ 出现订阅链接即成功。
+
+## 自查清单（还是失败时逐条核对）
+
+- [ ] 变量名是 `HUB_KV`（大写、下划线，无空格）
+- [ ] 下拉框真的选了命名空间（不是空的）
+- [ ] 添加绑定后**点了 Deploy**
+- [ ] 回课程助手**重新点了一次**「启用日历订阅」（旧配置不会自动重试）
+- [ ] 浏览器没缓存旧页面（Ctrl+F5 强刷后再试）
 
 # 附录 C：以后怎么更新小助手代码？
 

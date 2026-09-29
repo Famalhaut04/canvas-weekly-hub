@@ -396,6 +396,10 @@ function showSetup() {
       </div>
       <div class="frow"><label>微信 SendKey</label><input id="s-sendkey" type="password"
         placeholder="可选，在 sct.ftqq.com 免费获取"></div>
+      <div class="frow"><label></label>
+        <button class="btn" id="s-dlsite">⬇️ 下载离线版「我的学习网站.html」</button>
+        <span style="font-size:.8rem;color:var(--muted)">双击即开、可拷到手机；每次下载的都是当前最新数据</span>
+      </div>
       <div class="subbox" id="s-subbox" style="display:none">
         <div>✅ 已启用。把下面的链接添加到手机日历（订阅一次，永久自动更新）：</div>
         <code id="s-icsurl"></code>
@@ -524,6 +528,14 @@ function showSetup() {
     } catch (e) {
       window.open("https://raw.githubusercontent.com/Famalhaut04/canvas-weekly-hub/main/worker.js", "_blank");
       status("复制失败（浏览器限制）：已打开代码页，Ctrl+A 全选复制即可", S_WARN);
+    }
+  };
+  $("s-dlsite").onclick = async () => {
+    try {
+      await downloadWebsite();
+      status("✅ 已开始下载「我的学习网站.html」——双击即可打开，可拷到手机离线查看", S_OK);
+    } catch (e) {
+      status("❌ 下载失败：" + e.message, S_WARN);
     }
   };
   $("s-copy").onclick = () => {
