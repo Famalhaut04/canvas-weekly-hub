@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>系统概述 · Canvas Weekly Hub v2.2</title>
+<style>
+  :root { color-scheme: light dark; --bg:#f4f6fb; --panel:#fff; --ink:#172033; --muted:#5d697d; --line:#dfe5ef; --brand:#1e5aa8; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.75 "Segoe UI","Microsoft YaHei",system-ui,sans-serif; }
+  main { max-width:900px; margin:auto; padding:32px 18px 60px; }
+  h1 { font-size:1.9rem; line-height:1.35; margin:16px 0 10px; }
+  h2 { font-size:1.15rem; margin:0 0 10px; }
+  p { margin:8px 0; }
+  a { color:var(--brand); }
+  .top { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+  .badge { color:var(--brand); font-weight:700; }
+  .lead { color:var(--muted); }
+  section { background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:22px; margin-top:18px; }
+  .flow { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin-top:14px; }
+  .step { padding:16px; border:1px solid var(--line); border-radius:12px; }
+  .step b { display:block; color:var(--brand); }
+  .step span { font-size:.9rem; color:var(--muted); }
+  .table { overflow-x:auto; }
+  table { border-collapse:collapse; width:100%; font-size:.93rem; }
+  th,td { text-align:left; vertical-align:top; padding:10px 8px; border-bottom:1px solid var(--line); }
+  th:first-child,td:first-child { width:25%; }
+  ul { margin:8px 0; padding-left:22px; }
+  @media(max-width:600px) { h1 {font-size:1.5rem;} section{padding:16px;} .flow{grid-template-columns:1fr;} }
+  @media(prefers-color-scheme:dark) { :root {--bg:#0d1117;--panel:#161b22;--ink:#e6edf3;--muted:#a5afbf;--line:#303949;--brand:#79b8ff;} }
+</style>
+</head>
+<body><main>
+  <div class="top"><span class="badge">Canvas Weekly Hub · v2.2</span><a href="./">返回课程助手</a></div>
+  <h1>系统概述</h1>
+  <p class="lead">集中查看 Canvas 作业截止、提交状态、新课件、公告与变化。普通同学用自己的网页，agent 用户也可运行本地引擎。</p>
+  <section><h2>它怎么工作</h2>
+    <p>部署到自己的 Cloudflare 账号，打开自己的网址，粘贴令牌并点击“连接并生成看板”。不用填写 Worker 地址。</p>
+    <div class="flow">
+      <div class="step"><b>1 · 查询课程</b><span>浏览器经自己的 Worker 查询学校 Canvas，数据不经过作者服务器。</span></div>
+      <div class="step"><b>2 · 整理动态</b><span>浏览器筛选过去 7 天新内容、未来 7 天任务，与上次快照比较改期、评分和移除。</span></div>
+      <div class="step"><b>3 · 显示与保存</b><span>生成看板，配置和历史保存在当前浏览器；可以导出离线看板、日历与备份。</span></div>
+    </div>
+    <p>看板由你手动刷新。v2.2 暂停云端订阅与微信推送，不需要 KV、Cron 或 SendKey。</p>
+  </section>
+  <section><h2>每个部分负责什么</h2><div class="table"><table>
+    <thead><tr><th>部分</th><th>功能</th></tr></thead><tbody>
+    <tr><td>Canvas 与令牌</td><td>提供课程数据，允许以你的身份查询。项目只查询，不提交作业或修改课程。</td></tr>
+    <tr><td>个人 Worker</td><td>同时提供网页与查询代理，自动识别地址；不持久保存令牌或课程数据。</td></tr>
+    <tr><td>浏览器处理</td><td>查询课程、作业、文件清单与公告，识别近期内容并比较快照。作业失败保留旧数据，部分内容失败会提示。</td></tr>
+    <tr><td>学习看板</td><td>待办倒计时和提交状态；课程卡片的新作业、资料、公告与变化；历史切换、跨周搜索、深色模式。</td></tr>
+    <tr><td>存储与导出</td><td>当前浏览器保留配置和最多 52 份历史。HTML 离线查看，ICS 导入日历，JSON 迁移历史；导出不含配置凭证。</td></tr>
+    <tr><td>Python / agent</td><td>Python 直接访问 Canvas，生成周报、看板、ICS 和离线 HTML，按需下载课件；agent 或计划任务负责运行，电脑需要在线。</td></tr>
+    </tbody></table></div></section>
+  <section><h2>v2.2 更新了什么</h2><ul>
+    <li>网页和代理一起部署，主流程只填令牌，一次点击连接并生成。</li>
+    <li>其他学校和到期日按需展开，增加历史备份与导入。</li>
+    <li>完善进度、错误提示、超时与失败保护，修复手机窗口溢出。</li>
+    <li>限制查询接口、阻止认证重定向与敏感缓存，不默认开启请求日志。</li>
+    <li>保留本地日历下载、离线看板和 Python / agent；暂停云端订阅和微信提醒。</li>
+  </ul></section>
+  <section><h2>数据与隐私</h2>
+    <p>令牌和课程数据保存在自己的浏览器，查询经过自己的 Worker 和学校 Canvas。作者没有接收课程数据的服务器；Cloudflare 作为托管商会处理转发请求。只在可信设备、自己部署的网址输入令牌。</p>
+    <p>星数展示会请求 GitHub 公共 API，不携带 Canvas 凭证或课程数据。无课程数据遥测。导出文件含个人课程信息，请妥善保管。本地 Python 的 GitHub 推送默认关闭，开启时应使用自己的私有仓库。</p>
+    <p>换网址需要备份、导入历史并重新输入令牌。若旧版启用过订阅：先升级 Worker，再停用旧订阅、移除 Cron 并清理自己的旧 KV；旧 KV 不会自动清空。清除本机数据不会撤销 Canvas 令牌或云端配置。</p>
+    <p>日历文件导入后不会自动同步新变化；刷新看板后重新下载、导入即可。</p>
+  </section>
+</main></body>
+</html>

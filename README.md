@@ -1,168 +1,77 @@
-# Canvas Weekly Hub 🎓
+# Canvas Weekly Hub · v2.2
 
-[![GitHub Stars](https://img.shields.io/github/stars/Famalhaut04/canvas-weekly-hub?style=social&label=%E2%AD%90+Star)](https://github.com/Famalhaut04/canvas-weekly-hub/stargazers)
+把 Canvas 的作业截止、提交状态、新课件、公告和变化集中到一个学习看板。默认香港城市大学，其他 Canvas 学校可在高级设置修改地址。
 
-**城大 Canvas 课程助手** —— 为**香港城市大学（CityU）学生**打造的全自动 Canvas 课程周报与学习看板，基于 [Canvas LMS](https://www.instructure.com/canvas) API，同样兼容其他使用 Canvas 的学校。
+## 系统概述
 
-定时抓取你在 Canvas 上的全部课程动态：新作业、未提交任务、老师改的截止时间、新上传的 PPT、新公告，汇总成周报与一个属于你的学习看板。**算法公开，数据私有**——数据保存在你自己的设备；选择云端备份或订阅时会用到你自己的仓库或 Worker。本仓库不含任何人的凭证与数据。
+数据流程：**你的浏览器 → 你自己的 Cloudflare Worker → 学校 Canvas → 浏览器整理、显示并保存**。数据不经过作者服务器。
 
-## 🚀 两种用法，按需选择
+| 部分 | 功能 |
+|---|---|
+| Canvas + 令牌 | 提供课程数据；项目只调用查询接口，不提交作业或修改课程 |
+| 个人 Worker | 同时提供网页和查询代理，自动识别代理地址；不持久保存令牌或课程数据 |
+| 浏览器处理 | 筛选近期动态，比较快照，发现改期、新评分和移除 |
+| 学习看板 | 待办倒计时、课程动态、历史切换、跨周搜索、深色模式 |
+| 本机存储与导出 | 保存当前浏览器的配置与历史；导出离线 HTML、日历 ICS 和不含凭证的 JSON 备份 |
+| Python / agent（可选） | Python 直接访问 Canvas，生成周报、看板、日历，按需下载课件；agent 或计划任务负责运行 |
 
-### 🌐 网页版（推荐 · 不需要任何计算机基础 · 手机可用）
+看板由你手动刷新。**v2.2 暂停云端订阅和微信推送，不需要 KV、定时器或 SendKey。** 完整说明见 [系统概述](docs/系统概述.md) 或 [网页说明](https://famalhaut04.github.io/canvas-weekly-hub/web/overview.html)。
 
-**👉 点此打开：https://famalhaut04.github.io/canvas-weekly-hub/web/**
+## 普通同学：部署一次，填令牌即用
 
-打开网页后会看到「三步完成」的引导窗口，跟着点就行——**全程只用鼠标，不用写代码、不用懂 GitHub**：
+**[打开项目入口](https://famalhaut04.github.io/canvas-weekly-hub/web/)**
 
-| 步骤 | 你要做的 | 耗时 |
+1. 创建自己的助手：一键部署，或用邮箱登录 Cloudflare 后复制部署代码。
+2. 打开 Cloudflare 给出的自己的网址，看到“连接你的 Canvas”。
+3. 粘贴自己的 Canvas 令牌，点击“连接并生成看板”。
+
+| 创建方式 | 需要什么 | 操作 |
 |---|---|---|
-| ❶ 获取小助手 | 在页面点「📋 一键复制小助手代码」→ 用**邮箱**注册/登录 Cloudflare → 创建 Worker → 粘贴代码 → Deploy → 复制网址粘贴回页面（另有需 GitHub 账号的一键部署可选） | 约 3 分钟 |
-| ❷ 绑定令牌 | 去 Canvas 网站生成一个"访问令牌"（账户 → 设置 → 页面底部 + 新访问令牌），粘贴进页面 → 点「测试连接」 | 约 1 分钟 |
-| ❸ 生成看板 | 点「🚀 抓取并生成看板」→ 你的专属课程网站就出现了，可下载「我的学习网站.html」离线用 | 约 10 秒 |
+| [一键部署](https://deploy.workers.cloudflare.com/?url=https://github.com/Famalhaut04/canvas-weekly-hub) | Cloudflare + GitHub 账号 | 授权、部署，打开自己的网址 |
+| 仅邮箱方式 | Cloudflare 账号 | 复制部署代码 → Worker 编辑器全选替换 → Deploy |
 
-之后你将拥有：
+主流程只填令牌；其他学校、到期日按需展开。教程：[零基础部署](docs/Cloudflare部署图文教程.md) · [使用指南](docs/网页版使用指南.md)。若网络无法访问自己的 `workers.dev` 网址，请确认网络可达或使用自己绑定的可达域名。
 
-- ⏰ 所有作业的**截止时间倒计时**（未提交的红标提醒，最紧急的排最前）
-- ✅ 哪些交了、哪些**还没交**，一眼可见
-- 🔄 老师**改期 / 新评分 / 删作业**的变化提醒
-- 📂 新上传的课件清单
-- 📅 一键把截止日期**导入手机日历**（到点自动提醒，也可订阅链接永久自动更新）
-- 💬 微信**每日提醒**（可选，每天 18:30 推送未来 7 天待办）
-- 🌗 深色模式 · 🔍 跨周搜索 · 🗓 历史归档
+## 有 agent 经验：本地运行
 
-❓ **卡住了？** 看页面里的「📖 手把手图文教程」——注册、部署、每个英文按钮都有对照说明。更完整的说明见 **[网页版使用指南](docs/网页版使用指南.md)**
-
-本地 v2.2.0 候选迭代：支持 Worker 的 HTTPS 自定义域名；连接成功才保存设置；提前检测 KV 能力；抓取时显示课程进度、超时与部分失败警告。旧版 Worker 仍能生成看板，完整能力检测需要更新自己的 `worker.js`。尚未发布到线上入口，见 [升级验收报告](docs/1002_配置体验升级验收_v1.md)。
-
-### 🅰️ 如果有 AI agent，可以直接克隆仓库导入定时任务
+克隆仓库，复制 `config/canvas_config.example.json` 为 `canvas_config.json`，填写学校地址和令牌。Python 3.8+，仅依赖标准库。
 
 ```bash
-git clone https://github.com/Famalhaut04/canvas-weekly-hub.git
+python canvas_weekly_report.py --check-config
+python canvas_weekly_report.py
+python serve_board.py
 ```
 
-按 **[部署指南](docs/部署指南.md)** 配置令牌，然后把每周定时任务导入你的 agent，之后每周五晚自动抓取并**用中文向你汇报**。
-功能最全：可同时更新本地看板、备份到你的私有仓库、生成单文件看板与 ICS 日历。
+第一条只检查配置；第二条生成周报、看板、ICS，并按配置下载课件；第三条提供 `http://localhost:8137/` 与页内刷新。也可以双击生成的“我的学习网站.html”。
 
-> 没有桌面安装包：网页版已覆盖核心场景；如需「定时自动运行 + 课件自动下载到本地」的离线能力，
-> 克隆仓库后按部署指南用 Windows 计划任务运行抓取脚本（需 Python）即可实现。
+agent 或计划任务可定时运行。GitHub 备份默认关闭，开启时结果会上传到配置的仓库；只使用自己的私有仓库。详见 [本地部署指南](docs/部署指南.md)。
 
-> 两种方式数据格式完全一致，随时可以互换。
+## 旧用户升级
 
+- 更新自己的 Worker：手动部署用户复制新的 `worker.js` 全选替换并 Deploy；GitHub 部署用户同步更新。已部署实例不会因本仓库发布自动升级。
+- 历史迁移：旧页面在“离线查看 / 旧版数据迁移”中备份，新网址导入，再填写令牌。导入会替换当前看板，建议先备份。
+- 停用旧订阅：升级 Worker 后旧 Cron 不再执行抓取或推送；若原浏览器保留订阅密钥，可点“停用旧版云端订阅”移除旧配置和快照。也可在自己的 Cloudflare 删除旧 KV 配置、移除 Cron，并在 Canvas 撤销不用的令牌。清除本机数据不能撤销云端配置。
+- 原公共入口仍支持使用自己的旧 Worker 查询课程，不自动清除浏览器历史。
 
-## ✨ 功能
+## 主要文件
 
-- ⏰ **待办提醒**：跨课程汇总所有带截止时间的任务，按紧急度排序并显示倒计时（今天／明天／N 天后）
-- ✅ **提交状态**：自动识别每个任务"已提交 / 未提交 / 已评分"，未提交且快截止的一眼可见
-- 🔄 **变化检测**：与上次快照对比，老师改期、新评分、删除/隐藏作业都能报出明细
-- 📥 **课件自动下载**：新上传的 PPT/PDF 自动按课程归档到本地 `downloads/`，复习不用再手动逐个下载
-- 📅 **ICS 日历导出**：截止时间一键导入手机日历，系统级提醒
-- 🆕 **每周新布置**：过去 7 天老师新布置或有改动的任务，一眼看清要做什么
-- 📚 **分课程动态**：新作业、新上传的 PPT/PDF 资料（带类型图标和大小）、新公告
-- ⏳ **Token 到期提醒**：适配 CityU 90 天限制，剩 5 天自动在周报中预警
-- 🗓 **周报归档**：数据每周自动累积，可切换查看历史任意一周
-- 🔍 **跨周搜索**：按名称检索历史全部作业、资料、公告
-- 🌗 **深色模式**：跟随系统，亦可手动切换
-- 📄 **本地周报**：每次生成 markdown 文件存档，方便复习
-- 📦 **单文件看板**：生成一个自包含的 HTML，双击即开，无需服务器、可拷到手机看
-- 🤖 **AI 汇报**（方式 A）：配合 ZCode 自动化任务，每周五晚用中文向你汇报本周要点
-
-## 🔧 工作原理
-
-> 📖 **通俗+技术双版本详解：[docs/工作原理.md](docs/工作原理.md)**（数据从哪来/经过哪/存在哪）
-
-```
-             每周定时触发（agent 定时任务 / Windows 计划任务）
-                              │
-                              ▼
-                   canvas_weekly_report.py （同一个抓取引擎）
-                              │ Canvas REST API（你的个人 Token，只存本地）
-                              ▼
-        ┌─────────────────────┼─────────────────────┬──────────────────┐
-        ▼                     ▼                     ▼                  ▼
- reports/周报.md        看板 data.json        单文件看板 HTML      ICS 日历
- （本地存档）           （可选推送私有仓库备份）  （双击即开）        （导入手机）
-                              │
-                              ▼
-                    学习看板：待办倒计时、提交状态、
-                    变化检测、新资料、历史归档、跨周搜索
-```
-
-## 🏫 CityU 学生快速通道
-
-- Canvas 地址已在示例配置中预填 `https://canvas.cityu.edu.hk`，生成令牌填入即可使用；
-- CityU 的 API 令牌**最长有效期 90 天**，请在配置里填写到期日，程序会在**剩 5 天**时提醒你更换；
-- 只想看本学期课程：把配置里的 `term_filter` 设为 `2026/27 Semester A`；
-- 本项目只覆盖 Canvas，AIMS、校园邮箱等其他系统不在范围内。
-
-## 📁 目录结构
-
-```
-canvas_weekly_report.py      # 抓取引擎：拉 Canvas 数据 → 周报 → 看板 → 日历（命令行）
-serve_board.py               # 可选：本地看板服务（静态托管 + 页内 🔄 一键刷新接口）
-site-template/index.html     # 学习看板首页模板（单文件，无构建依赖）
-config/canvas_config.example.json   # 配置模板（Token 留空，由你自己填写）
-config/data.template.json    # 看板初始空数据文件
-docs/部署指南.md              # 方式 A：从零跑通的完整教程（含导入 agent 定时任务）
-docs/screenshots/            # 界面截图
-```
-
-## 🖼 看板预览
-
-> 以下截图为**虚构示例数据**（不含任何真实用户的课程信息）。
-
-| 桌面 · 浅色 | 手机 · 深色 |
+| 文件 | 作用 |
 |---|---|
-| ![桌面浅色](docs/screenshots/site-desktop-light.png) | ![手机深色](docs/screenshots/site-mobile-dark.png) |
+| `worker.js` | 可直接部署的完整包：网页、代理、系统概述和离线模板 |
+| `worker/runtime.js` | Worker 源码 |
+| `web/overrides.js`、`site-template/index.html` | 配置、抓取、导出与看板模板 |
+| `web/build_web.py` | 运行 `python web/build_web.py` 生成网页与部署包 |
+| `web/overview.html` | 面向用户的系统概述 |
+| `canvas_weekly_report.py`、`serve_board.py` | 本地引擎和看板服务 |
 
-## ⚙️ 配置说明
+## 数据与隐私
 
-`canvas_config.json`（由模板复制而来，**不会也不会被提交**）：
+令牌与课程数据保存在当前浏览器；查询经过自己的 Worker 和学校 Canvas，Cloudflare 作为托管商会处理这些请求。作者没有接收数据的后端。不要在他人部署的网址填写令牌；令牌是账号凭证，不是可公开的只读密码。
 
-| 字段 | 说明 | 默认 |
-|---|---|---|
-| `canvas_url` | 你学校 Canvas 的地址，如 `https://canvas.cityu.edu.hk` | — |
-| `access_token` | 你的 Canvas 个人访问令牌，**自行获取并填入** | 空 |
-| `token_expires_at` | 你的 Token 到期日（`YYYY-MM-DD`，见令牌生成页），剩 5 天开始在周报中预警 | 空 |
-| `token_remind_days` | Token 到期提前提醒天数 | 5 |
-| `lookback_days` | 统计"过去几天"的新内容 | 7 |
-| `upcoming_days` | 统计"未来几天"要截止的作业 | 7 |
-| `tz_offset_hours` | 展示用时区偏移（小时） | 8（UTC+8） |
-| `download_files` | 是否自动下载新课件到本地 | true |
-| `download_dir` | 课件保存目录（相对脚本数据目录） | downloads |
-| `term_filter` | 只统计匹配该关键字的学期，留空 = 全部活跃课程 | 空 |
-| `github.username` | 你的 GitHub 用户名 | — |
-| `github.repo_name` | 你的看板数据仓库名 | learning-hub |
-| `github.repo_dir` | 本机网站仓库路径，相对路径以脚本数据目录为基准 | 空（仅本地时不用填） |
-| `github.push_enabled` | 是否自动 commit + push 网站数据；启用前须自行确认仓库与公开范围 | false |
+无课程数据遥测，不默认启用 Worker 请求日志；代理只允许课程查询接口，不跟随携带令牌的重定向，敏感响应不缓存。星数展示会请求 GitHub 公共 API，**不携带 Canvas 令牌或课程数据**。导出的看板、日历与备份含个人课程信息，请妥善保管。
 
-本地版先复制示例并填写令牌，再运行 `python canvas_weekly_report.py --check-config` 检查格式；该命令不访问 Canvas、不下载、不推送。检查通过后运行 `python canvas_weekly_report.py`，可双击生成的离线看板，或运行 `python serve_board.py` 打开 `http://localhost:8137/`。本地服务直接读取引擎的 `data.json`，无需先建网站仓库。已有用户配置不会自动改写。
+## v2.2 公告
 
-## 🔐 安全与隐私（重要）
+网页与代理统一部署、令牌一键连接、可选项折叠、历史备份迁移、失败保护、手机布局与隐私改进。见 [简短公告](content/1002_v2.2更新公告_v1.md)、[GitHub Release](https://github.com/Famalhaut04/canvas-weekly-hub/releases/tag/v2.2)、[更新记录](CHANGELOG.md)。
 
-**算法公开，数据私有** —— 本仓库只有通用代码与模板，**不含任何使用者的课程数据**。每个人的课程信息都留在他自己的电脑和自己的仓库里：
-
-| 内容 | 位置 | 可见性 |
-|---|---|---|
-| 脚本、页面模板、文档 | 本仓库（公开） | 所有人可见，随便分享 |
-| `canvas_config.json`（含 Token） | 使用者本机 | 仅自己，`.gitignore` 已排除，不会入库 |
-| 课程数据仓库 `learning-hub` | 使用者自己的 GitHub 仓库 | **可设为私有**，课程信息仅自己可见 |
-
-- **完全不想公开网页？** 把网站仓库设为 Private（免费账号的 Pages 会随之停用），改为**本地看板**：在仓库目录运行 `python -m http.server 8137`，浏览器打开 `http://localhost:8137/`；同一 WiFi 下手机也能访问。周报脚本与数据更新不受影响，`git push` 仍可作为云端备份。详见[部署指南第 5 步](docs/部署指南.md)。
-- **本仓库不包含任何人的 Canvas 凭证。** `canvas_config.json` 需由使用者自己创建并填入自己的 Token（从 `config/canvas_config.example.json` 复制）。
-- Token 只保存在使用者本机，等同于账号凭证——不要提交、不要分享。若怀疑泄露，到 Canvas「账户 → 设置」删除该令牌即立即失效。
-- 课程数据仓库里只有页面代码与课程任务摘要（作业名/截止时间/文件名），不含 Token，也不含作业正文。
-- 网页版普通抓取时，令牌保存在浏览器并经你自己的 Worker 转发；启用日历订阅 / 微信提醒后，令牌与 SendKey 会保存到你自己的 Worker KV。订阅链接含访问密钥，不应公开分享。
-- 不小心把 Token 提交进了某个仓库？立即吊销旧 Token，必要时删除该仓库重建。
-
-## ❓ 常见问题
-
-见 [docs/部署指南.md 第 9 节](docs/部署指南.md#9-常见问题排查)（401 认证失败、GH007 邮箱隐私拦截、CDN 缓存、本地打开无数据等）。
-
-## 📢 更新公告
-
-- **2026-09-27 · v2.1.0**：**优化体验 · 简化配置**——三步引导设置（只需 1 个邮箱）、一键复制代码、地址即时检测、看板一键刷新、错误原因透传（详见 [CHANGELOG](CHANGELOG.md)）
-- 2026-09-20 · v2.0.0：网页版正式上线，桌面版停止分发
-
-## 📄 许可证
-
-[MIT](LICENSE)
+[工作原理](docs/工作原理.md) · [验证记录](docs/1002_v2.2一体化升级验收_v1.md) · [MIT 许可证](LICENSE)

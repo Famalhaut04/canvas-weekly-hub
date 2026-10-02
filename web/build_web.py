@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""构建网页版页面：site-template/index.html + overrides.js → web/index.html
+"""构建网页版与一体化 Worker：模板 + overrides.js → web/index.html / worker.js
 
 模板改动后运行：python web/build_web.py
 （GitHub Pages 直接托管生成的 web/index.html）
 """
+import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -34,6 +35,10 @@ OVERLAY_CSS = """
   #setup-overlay h3 { font-size: 1.1rem; margin-bottom: 4px; min-width: 0; }
   #setup-overlay .setup-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   #setup-overlay .setup-head .btn { flex-shrink: 0; }
+  #setup-overlay [hidden] { display: none !important; }
+  #setup-overlay .version-badge { color: var(--muted); font-size: .75rem; font-weight: 400; }
+  #setup-overlay .setup-steps { padding-left: 20px; margin: 8px 0; }
+  #setup-overlay .setup-steps li { margin: 6px 0; font-size: .88rem; }
   #setup-overlay .frow { display: flex; gap: 8px; align-items: center; margin: 9px 0; flex-wrap: wrap; }
   #setup-overlay .frow label { width: 128px; font-size: .9rem; color: var(--muted); }
   #setup-overlay input { flex: 1; min-width: 200px; padding: 7px 10px; border: 1px solid var(--line);
@@ -133,3 +138,17 @@ html = replace_once(html, "</body>",
 out = ROOT / "web" / "index.html"
 out.write_text(html, encoding="utf-8")
 print(f"已生成 {out}（{len(html) // 1024} KB）")
+
+# 一体化 Worker 内嵌网页、离线模板与系统概述，手动部署时只需复制一个 JS 文件。
+# 不依赖静态资源绑定、Python 云端构建或额外 npm 包。
+assert html.index("</head>") < html.index("<body>"), "未找到真正的 head 结束位置"
+integrated = html.replace("</head>",
+                          "<script>window.__HUB_WORKER_ORIGIN__ = location.origin;</script>\n</head>", 1)
+overview = (ROOT / "web" / "overview.html").read_text(encoding="utf-8")
+pages = {"/": integrated, "/overview": overview, "/site-template/index.html": tpl}
+runtime = (ROOT / "worker" / "runtime.js").read_text(encoding="utf-8")
+worker = ("/* 自动生成：请修改 worker/runtime.js、web/overrides.js 或页面模板，"
+          "然后运行 python web/build_web.py。 */\nconst HUB_PAGES = " +
+          json.dumps(pages, ensure_ascii=False) + ";\n" + runtime)
+(ROOT / "worker.js").write_text(worker, encoding="utf-8")
+print("已生成 worker.js（一体化部署包，%d KB）" % (len(worker.encode("utf-8")) // 1024))

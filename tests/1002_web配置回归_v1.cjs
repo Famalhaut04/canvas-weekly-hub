@@ -13,7 +13,7 @@ const cfg = { worker: "https://fixture.example", canvasUrl: "https://canvas.exam
 const info = { name: "canvas-weekly-hub proxy", ok: true,
   capabilities: { subscriptions: false } };
 
-function harness(seed = {}, route = async () => new Response("[]")) {
+function harness(seed = {}, route = async () => new Response("[]"), options = {}) {
   const values = new Map(Object.entries(seed));
   values.set("hubStars", JSON.stringify({ n: 1, t: Date.now() }));
   const nodes = new Map();
@@ -47,21 +47,26 @@ function harness(seed = {}, route = async () => new Response("[]")) {
     crypto: webcrypto, localStorage: storage,
     setTimeout: (fn, delay) => { timers.set(++timerId, { fn, delay }); return timerId; },
     clearTimeout: (id) => timers.delete(id),
-    fetch: async (url, options) => { calls.push({ url: String(url), options }); return route(String(url), options); },
+    fetch: async (url, requestOptions) => {
+      calls.push({ url: String(url), options: requestOptions });
+      if (String(url).endsWith("/health") && !options.health) return response({ error: "legacy route" }, 404);
+      return route(String(url), requestOptions);
+    },
     document: {
       getElementById: (id) => nodes.get(id) || null,
       createElement: () => new Element(), querySelector: () => null,
       body: { appendChild: (el) => nodes.set(el.id, el) },
     },
-    window: { __HUB_BOOT__: () => {} }, navigator: {}, location: { reload() {} },
+    window: { __HUB_BOOT__: () => {}, __HUB_WORKER_ORIGIN__: options.managedOrigin || "" },
+    navigator: {}, location: { reload() {} },
     confirm: () => false, alert() {}, boot() {},
     $: (id) => nodes.get(id),
   });
-  vm.runInContext(SOURCE + "\nglobalThis.api = {normalizeOrigin, validateHubCfg, hubCfg, fetchAll, apiAll, showSetup, withHubTask, requestText};", context);
+  vm.runInContext(SOURCE + "\nglobalThis.api = {normalizeOrigin, validateHubCfg, hubCfg, fetchAll, apiAll, showSetup, withHubTask, requestText, readSetup, buildBackup, validateBackup};", context);
   const form = (c = cfg) => {
     context.api.showSetup();
     for (const [id, field] of Object.entries({ "s-worker": "worker", "s-canvas": "canvasUrl",
-      "s-token": "token", "s-exp": "expires", "s-sendkey": "sendkey" })) nodes.get(id).value = c[field];
+      "s-token": "token", "s-exp": "expires", "s-sendkey": "sendkey" })) { if (nodes.has(id)) nodes.get(id).value = c[field]; }
   };
   return { context, api: context.api, values, nodes, storage, timers, calls, form };
 }
@@ -180,12 +185,11 @@ test("超时终止请求并给出可操作提示", async () => {
   assert.equal(h.timers.size, 0);
 });
 
-test("没有 KV 时阻止订阅上传，提示看板仍可用", async () => {
-  const h = harness({}, async () => response(info));
-  h.form();
-  await h.nodes.get("s-sub").onclick();
-  assert.match(h.nodes.get("s-status").textContent, /未绑定 KV/);
-  assert.equal(h.calls.some((c) => c.url.endsWith("/setup")), false);
+test("设置不提供云端订阅或 SendKey 输入", () => {
+  const h = harness(); h.form();
+  assert.equal(h.nodes.has("s-sub"), false);
+  assert.equal(h.nodes.has("s-sendkey"), false);
+  assert.match(h.nodes.get("s-capabilities").textContent || h.nodes.get("setup-overlay").innerHTML, /暂停云端订阅/);
 });
 
 test("关闭再打开设置会恢复已保存配置", () => {
@@ -209,48 +213,38 @@ test("Worker 根路由报告版本与 KV 能力", async () => {
   for (const bound of [false, true]) {
     const r = await worker.fetch(new Request("https://fixture.example/"), bound ? { HUB_KV: {} } : {});
     const data = await r.json();
-    assert.equal(data.version, "2.2.0");
-    assert.equal(data.capabilities.subscriptions, bound);
+    assert.equal(data.version, "2.2");
+    assert.equal(data.capabilities.integrated, true);
+    assert.equal(data.capabilities.subscriptions, false);
     assert.equal(data.name, info.name);
   }
 });
 
-test("Worker 作业失败时不发送提醒或保存错误快照", async () => {
+async function fixtureWorker() {
   const source = fs.readFileSync(path.join(ROOT, "worker.js"), "utf8");
-  const { default: worker } = await import("data:text/javascript;base64," + Buffer.from(source).toString("base64"));
-  const writes = new Map();
-  const calls = [];
-  const kv = { list: async () => ({ keys: [{ name: "cfg:fixture-secret" }] }),
-    get: async () => JSON.stringify({ token: "fixture-token", sendkey: "fixture-sendkey", host: "canvas.example" }),
-    put: async (key, value) => writes.set(key, value) };
-  const originalFetch = global.fetch;
-  global.fetch = async (url) => {
-    calls.push(String(url));
-    if (String(url).includes("/api/v1/courses?")) return response([{ id: 1 }]);
-    if (String(url).includes("/assignments?")) return response({ error: "fixture failure" }, 503);
-    return response([]);
-  };
-  try { await worker.scheduled({}, { HUB_KV: kv }, {}); }
-  finally { global.fetch = originalFetch; }
-  assert.equal(calls.some((url) => url.includes("sctapi.ftqq.com")), false);
-  assert.equal([...writes.keys()].some((key) => key.startsWith("snap:")), false);
-  assert.equal([...writes.keys()].some((key) => key.startsWith("err:")), true);
+  return (await import("data:text/javascript;base64," + Buffer.from(source).toString("base64"))).default;
+}
+
+test("云端订阅与旧 Cron 均停用，不查询或写入 KV", async () => {
+  const worker = await fixtureWorker();
+  const kv = new Proxy({}, { get() { throw new Error("不应访问 KV"); } });
+  const original = global.fetch; global.fetch = async () => { throw new Error("不应查询云端"); };
+  try {
+    await worker.scheduled({}, { HUB_KV: kv }, {});
+    for (const route of ["/setup", "/ics?secret=fixture-secret-at-least-16"]) {
+      const r = await worker.fetch(new Request("https://fixture.example" + route), { HUB_KV: kv });
+      assert.equal(r.status, 410); assert.equal(r.headers.get("Cache-Control"), "no-store");
+    }
+  } finally { global.fetch = original; }
 });
 
-test("Worker 日历拒绝异常列表和分页截断", async () => {
-  const source = fs.readFileSync(path.join(ROOT, "worker.js"), "utf8");
-  const { default: worker } = await import("data:text/javascript;base64," + Buffer.from(source).toString("base64"));
-  const kv = { get: async () => JSON.stringify({ token: "fixture-token", host: "canvas.example" }) };
-  const originalFetch = global.fetch;
-  try {
-    for (const [data, pattern] of [[{}, /列表格式异常/],
-      [Array.from({ length: 100 }, (_, id) => ({ id })), /分页达到上限/]]) {
-      global.fetch = async () => response(data);
-      const r = await worker.fetch(new Request("https://fixture.example/ics?secret=fixture-secret-at-least-16"), { HUB_KV: kv });
-      assert.equal(r.status, 500);
-      assert.match((await r.json()).error, pattern);
-    }
-  } finally { global.fetch = originalFetch; }
+test("旧版订阅可凭密钥停用，只移除自身配置与快照", async () => {
+  const worker = await fixtureWorker(); const removed = [];
+  const r = await worker.fetch(new Request("https://fixture.example/unsubscribe", {
+    method: "POST", body: JSON.stringify({ secret: "fixture-secret-at-least-16" }),
+  }), { HUB_KV: { delete: async (key) => removed.push(key) } });
+  assert.equal(r.status, 200);
+  assert.deepEqual(removed, ["cfg:fixture-secret-at-least-16", "snap:fixture-secret-at-least-16"]);
 });
 
 test("生成页面包含完整扩展脚本，所有内联脚本能解析", () => {
@@ -260,4 +254,93 @@ test("生成页面包含完整扩展脚本，所有内联脚本能解析", () =>
   const scripts = [...html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/gi)];
   assert.equal(scripts.length, 3);
   for (const match of scripts) new vm.Script(match[1]);
+});
+test("同源页面自动使用自己的 Worker，一次点击校验并生成", async () => {
+  const h = harness({ hubWorker: "https://old.example" }, async (url) => {
+    if (url.endsWith("/health")) return response({ ...info, version: "2.2" });
+    if (url.includes("users/self")) return response({ id: 1 });
+    return response([]);
+  }, { managedOrigin: cfg.worker, health: true });
+  h.form({ ...cfg, worker: "https://untrusted.example" });
+  await h.nodes.get("s-fetch").onclick();
+  assert.equal(h.values.get("hubWorker"), cfg.worker);
+  assert.equal(h.values.get("hubToken"), cfg.token);
+  assert.ok(JSON.parse(h.values.get("hubData")).weeks.length);
+  assert.ok(h.calls.every((c) => c.url.startsWith(cfg.worker + "/")));
+});
+
+function fixtureBackup() {
+  return { format: "canvas-weekly-hub-backup", version: 1, data: { canvas_url: cfg.canvasUrl,
+    weeks: [{ date: "2026-10-02", courses: [{ name: "Fixture", new_assignments: [], upcoming: [],
+      new_files: [], announcements: [], changes: [] }] }] }, state: { assignments: {} } };
+}
+
+test("备份不含配置凭证；额外顶层凭证不会导入", () => {
+  const backup = fixtureBackup(); backup.token = "do-not-export"; backup.data.token = "also-not-export";
+  const h = harness({ ...saved(), hubSecret: "private-secret", hubData: JSON.stringify(backup.data),
+    hubLastState: JSON.stringify(backup.state) });
+  const out = JSON.stringify(h.api.buildBackup());
+  for (const secret of [cfg.token, "private-secret", "do-not-export", "also-not-export"]) assert.ok(!out.includes(secret));
+  assert.equal(h.api.validateBackup(backup).data.token, undefined);
+  for (const value of [{}, { ...backup, version: 2 }, { ...backup, data: { canvas_url: cfg.canvasUrl, weeks: [] } },
+    { ...backup, state: { assignments: [] } }]) assert.throws(() => h.api.validateBackup(value));
+});
+
+test("导入学校不匹配不覆盖历史，导入成功也不更换令牌", async () => {
+  const backup = fixtureBackup(); const oldData = JSON.stringify(backup.data);
+  const h = harness({ ...saved(), hubData: oldData }); h.form();
+  const node = h.nodes.get("s-import-file");
+  node.files = [{ size: 1024, text: async () => JSON.stringify({ ...backup, data: { ...backup.data, canvas_url: "https://other.example" } }) }];
+  await node.onchange(); assert.equal(h.values.get("hubData"), oldData);
+  assert.match(h.nodes.get("s-status").textContent, /学校/);
+  node.files = [{ size: 1024, text: async () => JSON.stringify(backup) }];
+  await node.onchange(); assert.match(h.nodes.get("s-status").textContent, /已导入/);
+  assert.equal(h.values.get("hubToken"), cfg.token);
+});
+
+test("Worker 同时提供网页、说明、模板和兼容探测，设置内容安全策略", async () => {
+  const worker = await fixtureWorker();
+  for (const route of ["/", "/overview", "/site-template/index.html", "/web/index.html"]) {
+    const r = await worker.fetch(new Request("https://fixture.example" + route, { headers: { Accept: "text/html" } }), {});
+    assert.equal(r.status, 200); assert.match(r.headers.get("Content-Type"), /text\/html/);
+    assert.match(r.headers.get("Content-Security-Policy"), /sha256-|script-src 'none'/);
+    assert.equal(r.headers.get("Referrer-Policy"), "no-referrer");
+    const html = await r.text(); assert.match(html, /v2\.2/);
+    if (route === "/") assert.match(html, /__HUB_WORKER_ORIGIN__ = location.origin/);
+  }
+  const head = await worker.fetch(new Request("https://fixture.example/", { method: "HEAD", headers: { Accept: "text/html" } }), {});
+  assert.equal(await head.text(), "");
+});
+
+test("代理仅查询课程接口，拒绝异常地址并阻止认证重定向", async () => {
+  const worker = await fixtureWorker(); const original = global.fetch; const calls = [];
+  global.fetch = async (url, options) => { calls.push({ url: String(url), options }); return response({ id: 1 }); };
+  const request = (route, host = "canvas.example") => new Request("https://fixture.example/proxy/" + route, {
+    headers: { "X-Canvas-Host": host, "X-Canvas-Token": cfg.token },
+  });
+  try {
+    for (const host of ["evil.example/path", "user@evil.example", "127.0.0.1", "localhost", "evil.example:443"])
+      assert.equal((await worker.fetch(request("users/self", host), {})).status, 400);
+    assert.equal((await worker.fetch(request("users/1/profile"), {})).status, 400);
+    assert.equal(calls.length, 0);
+    const r = await worker.fetch(request("users/self"), {});
+    assert.equal(r.status, 200); assert.equal(r.headers.get("Cache-Control"), "no-store");
+    assert.equal(calls[0].url, "https://canvas.example/api/v1/users/self");
+    assert.ok(!calls[0].url.includes(cfg.token));
+    assert.equal(calls[0].options.headers.Authorization, "Bearer " + cfg.token);
+    assert.equal(calls[0].options.redirect, "manual");
+    global.fetch = async () => new Response(null, { status: 302, headers: { Location: "https://evil.example" } });
+    assert.equal((await worker.fetch(request("users/self"), {})).status, 502);
+  } finally { global.fetch = original; }
+});
+
+test("看板转义导入文本并阻止脚本链接", () => {
+  const html = fs.readFileSync(path.join(ROOT, "site-template/index.html"), "utf8");
+  const script = [...html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/gi)].find((m) => m[1].includes("function safeHref"));
+  const helpers = script[1].slice(script[1].indexOf("const esc"), script[1].indexOf("const HK"));
+  const c = vm.createContext({ URL, document: {} }); vm.runInContext(helpers + "\nglobalThis.helper = { safeHref, esc };", c);
+  for (const url of ["javascript:alert(1)", "data:text/html,test", "//evil.example", "https://user:pass@evil.example"])
+    assert.equal(c.helper.safeHref(url), "#");
+  assert.equal(c.helper.safeHref("downloads/file.pdf"), "downloads/file.pdf");
+  assert.equal(c.helper.esc("<img src=x onerror=alert(1)>"), "&lt;img src=x onerror=alert(1)&gt;");
 });

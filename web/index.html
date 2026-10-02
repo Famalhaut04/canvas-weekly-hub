@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>我的学习中心 · Canvas 课程周报</title>
+<title>我的学习中心 · Canvas Weekly Hub v2.2</title>
 <style>
   :root {
     --bg: #f4f6fb; --panel: #fff; --panel-2: #fafbfe; --ink: #111827; --muted: #6b7280;
@@ -48,6 +48,7 @@
   .meta { max-width: 1060px; margin: 0 auto; padding: 0 18px 12px; font-size: .8rem;
           color: rgba(255,255,255,.85); display: flex; gap: 10px; flex-wrap: wrap; }
   .meta i { font-style: normal; opacity: .55; }
+  .meta a { color: #fff; text-decoration: underline; text-underline-offset: 3px; }
 
   /* ---------- 布局 ---------- */
   main { max-width: 1060px; margin: 22px auto 70px; padding: 0 18px; }
@@ -109,6 +110,10 @@
   #setup-overlay h3 { font-size: 1.1rem; margin-bottom: 4px; min-width: 0; }
   #setup-overlay .setup-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   #setup-overlay .setup-head .btn { flex-shrink: 0; }
+  #setup-overlay [hidden] { display: none !important; }
+  #setup-overlay .version-badge { color: var(--muted); font-size: .75rem; font-weight: 400; }
+  #setup-overlay .setup-steps { padding-left: 20px; margin: 8px 0; }
+  #setup-overlay .setup-steps li { margin: 6px 0; font-size: .88rem; }
   #setup-overlay .frow { display: flex; gap: 8px; align-items: center; margin: 9px 0; flex-wrap: wrap; }
   #setup-overlay .frow label { width: 128px; font-size: .9rem; color: var(--muted); }
   #setup-overlay input { flex: 1; min-width: 200px; padding: 7px 10px; border: 1px solid var(--line);
@@ -208,14 +213,14 @@
 <body>
 <header>
   <div class="bar">
-    <div class="brand">📚 我的学习中心 <small>Canvas 课程周报</small></div>
+    <div class="brand">📚 我的学习中心 <small>Canvas 课程周报 · v2.2</small></div>
     <div class="spacer"></div>
     <label class="search">🔍
       <input id="q" type="search" placeholder="搜索作业 / 资料 / 公告" autocomplete="off">
     </label>
     <a id="canvas-link" class="icon-btn" title="打开 Canvas" target="_blank" rel="noopener"
        style="display:grid;place-items:center;text-decoration:none">🎓</a>
-    <button id="engine-refresh-btn" class="icon-btn" title="立即抓取最新数据（约10~30秒，含课件下载与云端备份）" style="display:none">🔄</button>
+    <button id="engine-refresh-btn" class="icon-btn" title="按本地配置抓取最新数据" style="display:none">🔄</button>
     <button id="settings-btn" class="icon-btn" title="设置：令牌 / 抓取 / 导出">⚙️</button>
     <button id="theme" class="icon-btn" title="切换深色 / 浅色">🌙</button>
   </div>
@@ -224,6 +229,7 @@
     <span id="range"></span><i>·</i>
     <span id="tz-label">UTC+8</span><i>·</i>
     <a id="ics-link" href="deadlines.ics" download title="导入手机日历，截止前 2 小时提醒">📅 截止日历</a>
+    <a href="https://github.com/Famalhaut04/canvas-weekly-hub" target="_blank" rel="noopener noreferrer" title="在 GitHub 支持项目">☆ Star<span id="star-count"></span></a>
   </div>
 </header>
 
@@ -251,7 +257,7 @@
 </main>
 
 <footer>
-  每周五 19:00 由自动化任务抓取 Canvas 并推送 · 托管于 GitHub Pages
+  Canvas Weekly Hub v2.2 · 手动刷新 · 配置与历史由自己保管
 </footer>
 
 <script>
@@ -259,6 +265,15 @@
 const esc = s => String(s === null || s === undefined ? "" : s)
   .replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const $ = id => document.getElementById(id);
+// 备份内容不能把 javascript: / data: 注入链接；本地课件相对路径仍可使用。
+function safeHref(value) {
+  const s = String(value || "").trim();
+  if (/^https:\/\//i.test(s)) {
+    try { const u = new URL(s); return u.username || u.password ? "#" : esc(u.href); }
+    catch (e) { return "#"; }
+  }
+  return s && !/[\\\x00-\x20]/.test(s) && !/^\/\//.test(s) && !/^[^/]*:/.test(s) ? esc(s) : "#";
+}
 const HK = "Asia/Hong_Kong";
 const fmtHK = d => new Intl.DateTimeFormat("zh-CN", {
   timeZone: HK, month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false
@@ -293,20 +308,20 @@ const score = c => c.new_assignments.length * 3 + c.upcoming.length * 3 + c.new_
 
 /* ================= 渲染片段 ================= */
 const subChip = a => a.graded
-  ? `<span class="pill sub-ok">已评分 ${a.score ?? "-"}</span>`
+  ? `<span class="pill sub-ok">已评分 ${esc(a.score ?? "-")}</span>`
   : a.submitted === true ? `<span class="pill sub-ok">已提交</span>`
   : a.submitted === false ? `<span class="pill sub-no">未提交</span>` : "";
 
 function assignRow(a, showStatus) {
   const d = due(a.due_iso, a.due_at);
-  const pts = a.points === null || a.points === undefined ? "" : `<span class="pill pts">${a.points} 分</span>`;
+  const pts = a.points === null || a.points === undefined ? "" : `<span class="pill pts">${esc(a.points)} 分</span>`;
   const st = showStatus && a.status
-    ? `<span class="pill ${a.status === "新布置" ? "new" : "upd"}">${a.status}</span>` : "";
+    ? `<span class="pill ${a.status === "新布置" ? "new" : "upd"}">${esc(a.status)}</span>` : "";
   const icon = KIND_ICON[a.kind] || "📌";
   return `<div class="row">
     <span class="ico" title="${esc(a.kind || "任务")}">${icon}</span>
     <span class="grow">
-      <a href="${esc(a.url)}" target="_blank" rel="noopener">${esc(a.name)}</a>
+      <a href="${safeHref(a.url)}" target="_blank" rel="noopener">${esc(a.name)}</a>
       <span class="sub">${esc(a.kind || "任务")}</span>
     </span>
     ${pts}${subChip(a)}${st}
@@ -316,7 +331,7 @@ function assignRow(a, showStatus) {
 
 function fileCard(f, course) {
   const href = f.url || (course && course.url) || "#";
-  return `<a class="file" href="${esc(href)}" target="_blank" rel="noopener" title="${esc(f.name)}">
+  return `<a class="file" href="${safeHref(href)}" target="_blank" rel="noopener" title="${esc(f.name)}">
     <span class="fico">${FILE_ICON[f.kind] || "📎"}</span>
     <span style="min-width:0">
       <span class="fname">${esc(f.name)}</span>
@@ -344,7 +359,7 @@ function courseCard(c, open) {
   if (c.announcements.length)
     block.push(`<h4>📢 公告 <em>${c.announcements.length}</em></h4>
       <ul class="ann">${c.announcements.map(a => `<li>
-        ${a.url ? `<a href="${esc(a.url)}" target="_blank" rel="noopener">${esc(a.title)}</a>`
+        ${a.url ? `<a href="${safeHref(a.url)}" target="_blank" rel="noopener">${esc(a.title)}</a>`
                 : `<strong>${esc(a.title)}</strong>`}
         <span class="atext">（${esc(a.created_at)}）${esc(a.summary)}…</span></li>`).join("")}</ul>`);
 
@@ -363,7 +378,7 @@ function courseCard(c, open) {
       <span class="badges">${badges.join("")}<span class="caret">▶</span></span>
     </summary>
     <div class="body">${block.join("")}
-      ${c.url ? `<a class="course-link" href="${esc(c.url)}" target="_blank" rel="noopener">在 Canvas 中打开该课程 ↗</a>` : ""}
+      ${c.url ? `<a class="course-link" href="${safeHref(c.url)}" target="_blank" rel="noopener">在 Canvas 中打开该课程 ↗</a>` : ""}
     </div>
   </details>`;
 }
@@ -443,8 +458,8 @@ function render() {
         return `<div class="row">
           <span class="ico">${d.cls === "urgent" ? "🔴" : d.cls === "soon" ? "🟠" : d.cls === "over" ? "⚪" : "🟢"}</span>
           <span class="grow">
-            <a href="${esc(a.url)}" target="_blank" rel="noopener">${esc(a.name)}</a>
-            <span class="sub">${esc(a.course)}${a.points !== null && a.points !== undefined ? " · " + a.points + " 分" : ""}</span>
+            <a href="${safeHref(a.url)}" target="_blank" rel="noopener">${esc(a.name)}</a>
+            <span class="sub">${esc(a.course)}${a.points !== null && a.points !== undefined ? " · " + esc(a.points) + " 分" : ""}</span>
           </span>
           ${subChip(a)}
           <span class="tail"><span class="due ${d.cls}">${esc(d.when)}${d.label ? `<span>${d.label}</span>` : ""}</span></span>
@@ -466,8 +481,8 @@ function render() {
         return `<div class="row">
           <span class="ico" title="${esc(a.kind || "")}">${KIND_ICON[a.kind] || "📌"}</span>
           <span class="grow">
-            <a href="${esc(a.url)}" target="_blank" rel="noopener">${esc(a.name)}</a>
-            <span class="sub">${esc(c.name)}${a.points !== null && a.points !== undefined ? " · " + a.points + " 分" : ""}</span>
+            <a href="${safeHref(a.url)}" target="_blank" rel="noopener">${esc(a.name)}</a>
+            <span class="sub">${esc(c.name)}${a.points !== null && a.points !== undefined ? " · " + esc(a.points) + " 分" : ""}</span>
           </span>
           ${subChip(a)}
           <span class="tail"><span class="due ${d.cls}">${esc(d.when)}${d.label ? `<span>${d.label}</span>` : ""}</span></span>
@@ -511,7 +526,7 @@ function renderSearch(q) {
     out.push(hits.assign.map(({ a, c, w }) => {
       const d = due(a.due_iso, a.due_at);
       return `<div class="row"><span class="ico">${KIND_ICON[a.kind] || "📌"}</span>
-        <span class="grow"><a href="${esc(a.url)}" target="_blank" rel="noopener">${esc(a.name)}</a>
+        <span class="grow"><a href="${safeHref(a.url)}" target="_blank" rel="noopener">${esc(a.name)}</a>
         <span class="sub">${esc(c.name)} · <span class="hit-week">周报 ${esc(w.date)}</span></span></span>
         <span class="tail"><span class="due ${d.cls}">${esc(d.when)}${d.label ? `<span>${d.label}</span>` : ""}</span></span></div>`;
     }).join(""));
@@ -524,7 +539,7 @@ function renderSearch(q) {
   if (hits.ann.length) {
     out.push(`<h4 style="font-size:.85rem;color:var(--brand);margin:14px 0 2px">公告</h4>`);
     out.push(`<ul class="ann">${hits.ann.map(({ x, c, w }) => `<li>
-      ${x.url ? `<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.title)}</a>` : `<strong>${esc(x.title)}</strong>`}
+      ${x.url ? `<a href="${safeHref(x.url)}" target="_blank" rel="noopener">${esc(x.title)}</a>` : `<strong>${esc(x.title)}</strong>`}
       <span class="atext">（${esc(x.created_at)} · ${esc(c.name)} · 周报 ${esc(w.date)}）${esc(x.summary)}…</span></li>`).join("")}</ul>`);
   }
   out.push(`</div>`);
@@ -640,6 +655,7 @@ window.__HUB_BOOT__ = function () {
 /* 依赖主脚本中的全局：$、esc、boot、render、DATA、buildIcsText（本文件提供） */
 
 const WEBSITE_FILE = "我的学习网站.html";
+const HUB_MANAGED_ORIGIN = window.__HUB_WORKER_ORIGIN__ || "";
 
 const HUB_STORE = {
   get(k, d) { try { return localStorage.getItem(k) ?? d; } catch (e) { return d; } },
@@ -680,7 +696,10 @@ function normalizeOrigin(value, label) {
 
 function validateHubCfg(cfg) {
   const c = Object.assign({}, cfg);
-  c.worker = normalizeOrigin(c.worker, "小助手地址");
+  // 本地浏览器验收允许同源 loopback HTTP；部署页面仍使用自己的 HTTPS 站点。
+  const managedLocal = HUB_MANAGED_ORIGIN && c.worker === HUB_MANAGED_ORIGIN &&
+    /^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(c.worker);
+  c.worker = managedLocal ? c.worker : normalizeOrigin(c.worker, "小助手地址");
   c.canvasUrl = normalizeOrigin(c.canvasUrl, "Canvas 地址");
   c.token = String(c.token || "").trim();
   if (!c.token || /\s/.test(c.token)) throw new Error("请填写完整的 Canvas 访问令牌，不要带空格或换行");
@@ -710,8 +729,8 @@ let hubBusy = false;
 async function withHubTask(action) {
   if (hubBusy) throw new Error("已有操作正在进行，请等待完成后再试");
   hubBusy = true;
-  const ids = ["s-test", "s-fetch", "s-sub", "s-close", "s-close2", "s-clear", "refresh-btn"];
-  ids.push("s-worker", "s-canvas", "s-token", "s-exp", "s-sendkey");
+  const ids = ["s-test", "s-fetch", "s-unsub", "s-close", "s-close2", "s-clear", "refresh-btn", "s-import", "s-backup"];
+  ids.push("s-worker", "s-canvas", "s-token", "s-exp");
   const buttons = ids.map((id) => document.getElementById(id)).filter(Boolean);
   const disabled = buttons.map((b) => b.disabled);
   buttons.forEach((b) => { b.disabled = true; });
@@ -724,7 +743,7 @@ async function withHubTask(action) {
 
 function hubCfg() {
   return {
-    worker: (HUB_STORE.get("hubWorker") || "").trim(),
+    worker: HUB_MANAGED_ORIGIN || (HUB_STORE.get("hubWorker") || "").trim(),
     canvasUrl: (HUB_STORE.get("hubCanvasUrl") || "https://canvas.cityu.edu.hk").trim(),
     token: (HUB_STORE.get("hubToken") || "").trim(),
     expires: (HUB_STORE.get("hubExpires") || "").trim(),
@@ -1007,15 +1026,16 @@ function buildIcsText(data, daysAhead) {
 async function downloadWebsite() {
   const data = JSON.parse(HUB_STORE.get("hubData") || "null");
   if (!data || !data.weeks || !data.weeks.length) {
-    alert("还没有数据，请先「🚀 抓取我的课程」");
+    alert("还没有数据，请先连接并生成看板");
     return;
   }
-  const r = await fetch("../site-template/index.html");
+  const r = await fetch(HUB_MANAGED_ORIGIN ? "/site-template/index.html" : "../site-template/index.html");
   if (!r.ok) throw new Error("无法读取页面模板（HTTP " + r.status + "）");
   const tpl = await r.text();
   const ics = buildIcsText(data);
-  const inject = "<script>window.__HUB_DATA__ = " + JSON.stringify(data) +
-                 ";window.__HUB_ICS__ = " + JSON.stringify(ics) + ";<\/script>\n</head>";
+  const safeJson = (value) => JSON.stringify(value).replace(/</g, "\\u003c");
+  const inject = "<script>window.__HUB_DATA__ = " + safeJson(data) +
+                 ";window.__HUB_ICS__ = " + safeJson(ics) + ";<\/script>\n</head>";
   const blob = new Blob([tpl.replace("</head>", inject)], { type: "text/html;charset=utf-8" });
   triggerDownload(blob, WEBSITE_FILE);
 }
@@ -1037,24 +1057,20 @@ function downloadIcs() {
 
 /* ---------------- 设置浮层 ---------------- */
 
-function genSecret() {
-  const b = new Uint8Array(18);
-  crypto.getRandomValues(b);
-  return Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
-}
-
 function showSetup() {
   let ov = document.getElementById("setup-overlay");
   if (ov) {
     const saved = hubCfg();
     const fields = { "s-worker": "worker", "s-canvas": "canvasUrl", "s-token": "token",
-                     "s-exp": "expires", "s-sendkey": "sendkey" };
+                     "s-exp": "expires" };
     for (const id of Object.keys(fields)) $(id).value = saved[fields[id]];
     $("s-status").textContent = "";
     $("worker-check").textContent = "";
-    $("s-capabilities").textContent = "订阅需要 KV 存储；测试连接时会检查是否可用。";
+    $("s-capabilities").textContent = "v2.2 暂停云端订阅与微信提醒；日历仍可下载后导入。";
+    $("s-unsub").hidden = !saved.secret;
     ov.style.display = "flex";
-    $("s-worker").dispatchEvent(new Event("input"));
+    if (!HUB_MANAGED_ORIGIN) $("s-worker").dispatchEvent(new Event("input"));
+    $("s-canvas").dispatchEvent(new Event("input"));
     return;
   }
   ov = document.createElement("div");
@@ -1063,108 +1079,69 @@ function showSetup() {
   ov.innerHTML = `
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="setup-title">
     <div class="setup-head">
-      <h3 id="setup-title" style="flex:1">⚙️ 设置 · 三步完成</h3>
-      <a class="btn" href="https://github.com/Famalhaut04/canvas-weekly-hub/blob/main/docs/Cloudflare%E9%83%A8%E7%BD%B2%E5%9B%BE%E6%96%87%E6%95%99%E7%A8%8B.md"
-         target="_blank" rel="noopener">📖 图文教程</a>
+      <h3 id="setup-title" style="flex:1">${HUB_MANAGED_ORIGIN ? "连接你的 Canvas" : "创建你的课程助手"} <small class="version-badge">v2.2</small></h3>
+      <a class="btn" href="${HUB_MANAGED_ORIGIN ? "/overview" : "./overview.html"}" target="_blank" rel="noopener">系统概述</a>
       <button class="btn" id="s-close" aria-label="关闭设置">✕</button>
     </div>
+    <p class="hint">${HUB_MANAGED_ORIGIN ? "助手已就绪。粘贴自己的 Canvas 令牌，点击下方按钮即可生成看板。" : "先创建属于自己的网页。之后只需填 Canvas 令牌，不用配置代理地址。"}</p>
 
-    <div class="fstep">
-      <div class="fstep-h">❶ 创建你的「传话小助手」（免费 · 只需一个邮箱 · 约 3 分钟）</div>
-      <p class="hint">学校禁止网页直接访问 Canvas，所以需要一个<b>只属于你的免费小助手</b>帮你转发数据——
-      令牌只经过你自己的账号，不经过任何人。照下面 4 步点，全程不写代码：</p>
-      <p class="hint">
-        1️⃣ 打开 <a href="https://dash.cloudflare.com" target="_blank" rel="noopener">dash.cloudflare.com</a>，用<b>邮箱</b>注册（到邮箱点 Verify 验证；随后弹的新手引导/选方案/加域名<b>全部跳过</b>）；<br>
-        2️⃣ 左侧 <b>Compute (Workers)</b>（旧版界面叫 Workers &amp; Pages）→ 右上 <b>Create application</b> → <b>Create Worker</b> → 名字如 canvas → 点 <b>Deploy</b>；<br>
-        3️⃣ 点 <b>Edit code</b> → <b>Ctrl+A 全选</b>后粘贴下面按钮复制的代码（⚠️ 必须替换掉示例的 Hello World，否则会报错）→ 点右上 <b>Deploy</b>；<br>
-        4️⃣ 复制页面上方的 <code>https://名字.你的子域.workers.dev</code> 填到下面——看到 <b>✅ 小助手在线</b> 再继续第❷步。
-      </p>
-      <div class="frow">
-        <button class="btn primary" id="s-copycode">📋 一键复制小助手代码</button>
-        <a href="https://github.com/Famalhaut04/canvas-weekly-hub/blob/main/docs/Cloudflare%E9%83%A8%E7%BD%B2%E5%9B%BE%E6%96%87%E6%95%99%E7%A8%8B.md"
-           target="_blank" rel="noopener">📖 卡住了？零基础分步指南（每步都有完成标志）</a>
-      </div>
-      <div class="frow"><label for="s-worker">小助手地址</label>
-        <input id="s-worker" type="url" autocomplete="off" spellcheck="false" placeholder="https://canvas-weekly-hub.你的子域.workers.dev"></div>
-      <p class="hint">也支持你绑定的 HTTPS 自定义域名，只填站点地址。</p>
-      <details class="faq"><summary>更省事的「一键部署」版（需要 GitHub 账号；自动配置提醒功能所需的存储）</summary>
-        <p class="hint">点 <a href="https://deploy.workers.cloudflare.com/?url=https://github.com/Famalhaut04/canvas-weekly-hub"
-        target="_blank" rel="noopener">🚀 一键部署 ↗</a> → 按提示登录 Cloudflare 与 GitHub → 点 <b>Create and Deploy</b> →
-        复制它给的网址填到上面输入框。此方式会自动创建 KV，「日历订阅 / 微信提醒」开箱即用；
-        上面的手动方式看板功能完整，订阅功能需按教程常见问题绑定 KV。</p>
+    <section id="s-deploy" ${HUB_MANAGED_ORIGIN ? "hidden" : ""} class="fstep">
+      <div class="fstep-h">第一次使用：选择一种创建方式</div>
+      <a class="btn primary" href="https://deploy.workers.cloudflare.com/?url=https://github.com/Famalhaut04/canvas-weekly-hub" target="_blank" rel="noopener">一键创建（需 Cloudflare + GitHub 账号）</a>
+      <p class="hint">按部署页面完成授权，部署成功后打开自己的网址。网页与查询代理一起部署，数据不经过作者服务器。</p>
+      <details class="faq" id="s-email"><summary>只有邮箱？按这 3 步创建</summary>
+        <ol class="setup-steps">
+          <li>用邮箱登录 <a href="https://dash.cloudflare.com" target="_blank" rel="noopener">Cloudflare</a>，进入 Workers，创建一个 Worker 并 Deploy。</li>
+          <li>点击下方“复制部署代码”，在 Edit code 中全选替换原代码，再点 Deploy。</li>
+          <li>打开 Cloudflare 给你的网址；看到“连接你的 Canvas”后粘贴令牌。</li>
+        </ol>
+        <div class="bar"><button class="btn primary" id="s-copycode">复制部署代码</button>
+          <a class="btn" href="../worker.js" download="canvas-weekly-hub-v2.2.js">下载部署代码</a></div>
+        <p class="hint">不需要 KV、定时器或 SendKey，也不用安装软件。</p>
       </details>
-    </div>
+      <p class="hint"><a href="https://github.com/Famalhaut04/canvas-weekly-hub/blob/main/docs/Cloudflare%E9%83%A8%E7%BD%B2%E5%9B%BE%E6%96%87%E6%95%99%E7%A8%8B.md" target="_blank" rel="noopener">打开分步部署教程</a></p>
+    </section>
 
-    <div class="fstep">
-      <div class="fstep-h">❷ 绑定你的 Canvas 令牌（约 1 分钟）</div>
-      <div class="frow"><label for="s-canvas">Canvas 地址</label><input id="s-canvas" type="url" spellcheck="false" placeholder="https://canvas.cityu.edu.hk"></div>
-      <div class="frow"><label for="s-token">访问令牌</label><input id="s-token" type="password" autocomplete="off" spellcheck="false"
-        placeholder="登录 Canvas 后生成，获取方法点下面的折叠说明"></div>
-      <details class="faq"><summary>❓ 如何获取令牌？（约 1 分钟，只在第一次需要）</summary>
-        <p class="hint">1) 登录 Canvas（<a href="https://canvas.cityu.edu.hk/profile/settings" target="_blank" rel="noopener">直达令牌生成页 ↗</a>，如提示登录先用学校账号登录）；
-        2) 左下角 <b>账户(Account) → 设置(Settings)</b>；
-        3) 拉到页面最底部「已批准的集成」→ 点 <b>+ 新访问令牌</b>；
-        4) 目的随便填（如 weekly-report），点 <b>生成</b> → <b>立刻复制</b>（只显示这一次）粘贴到上面；
-        5) 城大令牌最长 90 天——把生成页显示的到期日填到下面④，<b>剩 5 天会自动提醒你更换</b>。</p>
+    ${HUB_MANAGED_ORIGIN ? "<section class=\"fstep\">" : "<details class=\"faq\" id=\"s-legacy\" " + (cfg.worker && cfg.token ? "open" : "") + "><summary>已有旧版小助手？继续使用原配置</summary>"}
+      <div class="frow" ${HUB_MANAGED_ORIGIN ? "hidden" : ""}><label for="s-worker">小助手地址</label>
+        <input id="s-worker" type="url" autocomplete="off" spellcheck="false" placeholder="https://你的助手.workers.dev"></div>
+      <div class="frow"><label for="s-token">Canvas 令牌</label><input id="s-token" type="password" autocomplete="off" spellcheck="false" placeholder="粘贴自己的访问令牌"></div>
+      <p class="hint">从 <a id="s-token-help" href="https://canvas.cityu.edu.hk/profile/settings" target="_blank" rel="noopener">Canvas 账户 → 设置 → 新访问令牌</a> 获取，生成后立即复制。</p>
+      <div class="frow"><label></label><button class="btn primary" id="s-fetch">连接并生成看板</button></div>
+      <details class="faq" id="s-advanced"><summary>其他学校 / 到期日 / 连接检查</summary>
+        <div class="frow"><label for="s-canvas">Canvas 地址</label><input id="s-canvas" type="url" spellcheck="false" placeholder="https://canvas.cityu.edu.hk"></div>
+        <div class="frow"><label for="s-exp">令牌到期日</label><input id="s-exp" type="date"></div>
+        <p class="hint">默认香港城市大学。到期日选填；只填学校站点地址，不附带页面路径。</p>
+        <button class="btn" id="s-test">仅检查连接</button>
       </details>
-      <div class="frow"><label for="s-exp">令牌到期日</label><input id="s-exp" type="date"></div>
-      <p class="hint">到期日选填。测试连接成功后保存；关闭设置会放弃未保存的输入。</p>
-      <div class="frow"><label></label>
-        <button class="btn primary" id="s-test">🔌 测试连接</button>
-        <span style="font-size:.8rem;color:var(--muted)">显示 ✅ 后再进行第 ❸ 步</span>
-      </div>
-      <div class="status" id="s-status" role="status" aria-live="polite"></div>
-    </div>
+    ${HUB_MANAGED_ORIGIN ? "</section>" : "</details>"}
+    <div class="status" id="s-status" role="status" aria-live="polite"></div>
 
-    <div class="fstep">
-      <div class="fstep-h">❸ 生成看板 &amp; 开启提醒</div>
-      <div class="frow"><label></label>
-        <button class="btn primary" id="s-fetch">🚀 抓取并生成看板</button>
-        <span style="font-size:.8rem;color:var(--muted)">抓完会自动打开你的看板</span>
-      </div>
-      <div class="frow"><label></label>
-        <button class="btn" id="s-sub">📅 启用日历订阅 / 微信提醒</button>
-        <span style="font-size:.8rem;color:var(--muted)">手机日历自动提醒截止；微信每天 18:30 推送待办</span>
-      </div>
-      <p class="hint" id="s-capabilities">订阅需要 KV 存储；测试连接时会检查是否可用。</p>
-      <p class="hint">普通看板只在浏览器保存令牌；启用订阅会把令牌保存到你自己 Worker 的 KV。
-        订阅链接含访问密钥，请勿公开分享。微信提醒还需要配置 Worker 定时触发器。</p>
-      <div class="frow"><label for="s-sendkey">微信 SendKey</label><input id="s-sendkey" type="password" autocomplete="off"
-        placeholder="可选，在 sct.ftqq.com 免费获取"></div>
-      <div class="frow"><label></label>
-        <button class="btn" id="s-dlsite">⬇️ 下载离线版「我的学习网站.html」</button>
-        <span style="font-size:.8rem;color:var(--muted)">双击即开、可拷到手机；每次下载的都是当前最新数据</span>
-      </div>
-      <div class="subbox" id="s-subbox" style="display:none">
-        <div>✅ 已启用。把下面的链接添加到手机日历（订阅一次，永久自动更新）：</div>
-        <code id="s-icsurl"></code>
-        <button class="btn" id="s-copy" style="margin-top:6px">复制链接</button>
-      </div>
-    </div>
-
-    <details class="faq" style="margin:10px 18px 0"><summary>❓ 常见问题</summary>
-      <p class="hint">
-      <b>Failed to fetch</b>：小助手地址填错或还没部署完成 → 回到①检查；<br>
-      <b>HTTP 401</b>：令牌错误或过期 → 到 Canvas 重新生成并粘贴；<br>
-      <b>显示 0 门课程</b>：确认 Canvas 地址是 canvas.cityu.edu.hk；<br>
-      <b>清除浏览器缓存后要重新粘贴令牌</b>：正常现象，数据可重新抓取，建议常点「⬇️ 下载我的学习网站」留离线备份。</p>
+    <p class="hint" id="s-capabilities">v2.2 暂停云端订阅与微信提醒；日历仍可下载后导入。</p>
+    <button class="btn" id="s-unsub" ${cfg.secret ? "" : "hidden"}>停用旧版云端订阅</button>
+    <details class="faq"><summary>离线查看 / 旧版数据迁移</summary>
+      <div class="bar"><button class="btn" id="s-dlsite">下载离线看板</button><button class="btn" id="s-backup">备份看板数据</button>
+        <button class="btn" id="s-import">导入历史数据</button><input id="s-import-file" type="file" accept=".json,application/json" hidden></div>
+      <p class="hint">换到自己的新网址时，在旧页面备份、到新页面导入。备份仅含课程数据与快照，不含令牌或 SendKey；导入会替换当前浏览器看板，建议先备份。</p>
     </details>
-
-    <p class="hint">🔍 好奇它是怎么运行的、数据存在哪？看
-      <a href="https://github.com/Famalhaut04/canvas-weekly-hub/blob/main/docs/%E5%B7%A5%E4%BD%9C%E5%8E%9F%E7%90%86.md"
-         target="_blank" rel="noopener">《工作原理》</a>（大白话 + 技术细节双版本）</p>
-    <div style="display:flex;justify-content:space-between;margin-top:12px">
-      <button class="btn" id="s-clear" style="color:#c0392b">清除我的数据</button>
-      <button class="btn" id="s-close2">关闭</button>
+    <p class="hint">连接成功或抓取成功后才保存输入。普通看板的数据与令牌保存在当前浏览器。</p>
+    <div class="setup-head" style="justify-content:space-between;margin-top:12px">
+      <button class="btn" id="s-clear" style="color:#c0392b">清除本机数据</button><button class="btn" id="s-close2">关闭</button>
     </div>
-  </div>`;;
+  </div>`;
   document.body.appendChild(ov);
 
   $("s-worker").value = cfg.worker;
   $("s-canvas").value = cfg.canvasUrl;
   $("s-token").value = cfg.token;
   $("s-exp").value = cfg.expires;
-  $("s-sendkey").value = cfg.sendkey;
+  const updateTokenHelp = () => {
+    try { $("s-token-help").href = normalizeOrigin($("s-canvas").value, "Canvas 地址") + "/profile/settings"; }
+    catch (e) { $("s-token-help").href = "https://canvas.cityu.edu.hk/profile/settings"; }
+  };
+  $("s-canvas").addEventListener("input", updateTokenHelp);
+  updateTokenHelp();
+
 
   const status = (msg, color) => {
     const el = $("s-status");
@@ -1174,17 +1151,15 @@ function showSetup() {
   const S_WARN = "#c0392b", S_OK = "#0f8a4f";
 
   const showCapabilities = (info) => {
-    const el = $("s-capabilities");
-    if (!info.capabilities || typeof info.capabilities.subscriptions !== "boolean") {
-      el.textContent = "小助手使用旧版代码，无法预检 KV；看板可用，订阅需自行确认 KV 和定时触发器。";
-    } else {
-      el.textContent = info.capabilities.subscriptions
-        ? "✅ 已绑定 KV，可以启用日历订阅；微信提醒还需设置每天 18:30 的定时触发器。"
-        : "ℹ️ 未绑定 KV：可以生成看板和下载日历；订阅 / 微信提醒请先按图文教程绑定 HUB_KV。";
-    }
+    $("s-capabilities").textContent = info.version === "2.2"
+      ? "v2.2 已连接。云端订阅与微信提醒暂停，日历可下载后导入。"
+      : "小助手使用旧版代码，看板可用；建议更新到 v2.2。云端订阅入口已暂停。";
   };
+
   const checkWorker = async (c) => {
-    const { response, body } = await requestText(c.worker + "/");
+    let result = await requestText(c.worker + "/health");
+    if (result.response.status === 404) result = await requestText(c.worker + "/");
+    const { response, body } = result;
     let info;
     try { info = JSON.parse(body); } catch (e) { /* 下面提供统一提示 */ }
     if (!response.ok || !info || info.name !== "canvas-weekly-hub proxy" || info.ok !== true)
@@ -1213,6 +1188,8 @@ function showSetup() {
       await withHubTask(async () => {
         const c = readSetup();
         await checkWorker(c);
+        const me = await workerApi("users/self", {}, c);
+        if (!me || !me.id) throw new Error("Canvas 认证失败，本次配置未保存");
         const data = await fetchAll(c, status);
         status("✅ 完成：" + data.weeks[0].courses.length + " 门课程已生成看板", S_OK);
         boot(data);
@@ -1222,35 +1199,21 @@ function showSetup() {
       });
     } catch (e) { status("❌ " + e.message, S_WARN); }
   };
-  $("s-sub").onclick = async () => {
+  $("s-unsub").onclick = async () => {
     try {
       await withHubTask(async () => {
-        const c = readSetup();
-        status("正在检查订阅能力…");
-        const info = await checkWorker(c);
-        if (info.capabilities && info.capabilities.subscriptions === false)
-          throw new Error("未绑定 KV：请按图文教程绑定 HUB_KV 后再启用订阅；看板与日历下载不受影响");
-        const me = await workerApi("users/self", {}, c);
-        if (!me || !me.id) throw new Error("Canvas 返回的用户信息不完整，未启用订阅");
-        const secret = c.secret || genSecret();
-        // 先确认本地可保存密钥，以免云端成功后丢失访问订阅的凭证。
-        saveSetup(Object.assign({}, c, { secret }));
-        const { response: r, body } = await requestText(c.worker + "/setup", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ secret: secret, token: c.token, sendkey: c.sendkey,
-                                 host: hostOf(c.canvasUrl) }),
+        const c = hubCfg();
+        if (!c.secret) throw new Error("本浏览器没有订阅密钥；如曾在其他设备启用，请在那里关闭或在自己的 KV 中移除 cfg: 配置");
+        status("正在关闭云端订阅…");
+        const { response: r, body } = await requestText(c.worker + "/unsubscribe", {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ secret: c.secret }),
         });
-        let j;
-        try { j = JSON.parse(body); } catch (e) { throw new Error("小助手订阅接口返回非 JSON 数据，请检查部署代码"); }
-        if (!r.ok || !j.ok) throw new Error(j.error || "HTTP " + r.status);
-        const link = new URL(j.icsUrl);
-        if (link.origin !== c.worker || link.pathname !== "/ics" || link.searchParams.get("secret") !== secret)
-          throw new Error("小助手返回的订阅链接不正确，请更新 Worker 代码");
-        $("s-subbox").style.display = "block";
-        $("s-icsurl").textContent = j.icsUrl;
-        setIcsLink(j.icsUrl);
-        status("✅ 已启用：把上面链接订阅到手机日历（截止前2小时提醒）；" +
-               (c.sendkey ? "SendKey 已保存，请确认 Worker Cron 已设置为每天 18:30" : "如需微信提醒，填写 Server酱 SendKey 后再点一次本按钮"));
+        const j = JSON.parse(body);
+        if (!r.ok || !j.ok) throw new Error("关闭失败，请更新 Worker 或在自己的 KV 中移除 cfg: 配置");
+        storeTogether({ hubSecret: "", hubSendKey: "" });
+        $("s-unsub").hidden = true;
+        $("ics-link").href = "deadlines.ics";
+        status("✅ 云端订阅配置与快照已移除；定时提醒已停用，本机看板保留。旧日历可能仍显示已缓存的事件。", S_OK);
       });
     } catch (e) { status("❌ " + e.message, S_WARN); }
   };
@@ -1294,22 +1257,26 @@ function showSetup() {
     wkInp.addEventListener("input", () => {
       wkRevision += 1;
       $("worker-check").textContent = "";
-      $("s-capabilities").textContent = "订阅需要 KV 存储；测试连接时会检查是否可用。";
+      $("s-capabilities").textContent = "v2.2 暂停云端订阅与微信提醒；日历仍可下载后导入。";
       clearTimeout(wkTimer); wkTimer = setTimeout(wkRun, 700);
     });
-    if (wkInp.value) wkRun();
+    if (wkInp.value && !HUB_MANAGED_ORIGIN) wkRun();
   }
 
   $("s-copycode").onclick = async () => {
     try {
-      const r = await fetch("https://raw.githubusercontent.com/Famalhaut04/canvas-weekly-hub/main/worker.js");
+      const r = await fetch("../worker.js");
       if (!r.ok) throw new Error("HTTP " + r.status);
       const code = await r.text();
-      await navigator.clipboard.writeText(code);
-      status("✅ 代码已复制到剪贴板。去 Cloudflare 的 Edit code 里全选粘贴，点右上 Deploy 即可", S_OK);
+      try {
+        await navigator.clipboard.writeText(code);
+        status("✅ 代码已复制。到 Cloudflare 的 Edit code 全选粘贴并 Deploy，然后打开自己的网址。", S_OK);
+      } catch (clipboardError) {
+        triggerDownload(new Blob([code], { type: "text/javascript;charset=utf-8" }), "canvas-weekly-hub-v2.2.js");
+        status("浏览器未允许复制，已下载部署代码；用文本编辑器打开后全选复制到 Cloudflare。", S_WARN);
+      }
     } catch (e) {
-      window.open("https://raw.githubusercontent.com/Famalhaut04/canvas-weekly-hub/main/worker.js", "_blank");
-      status("复制失败（浏览器限制）：已打开代码页，Ctrl+A 全选复制即可", S_WARN);
+      status("无法读取部署代码：" + e.message + "。请使用旁边的“下载部署代码”按钮。", S_WARN);
     }
   };
   $("s-dlsite").onclick = async () => {
@@ -1320,13 +1287,30 @@ function showSetup() {
       status("❌ 下载失败：" + e.message, S_WARN);
     }
   };
-  $("s-copy").onclick = () => {
-    navigator.clipboard.writeText($("s-icsurl").textContent)
-      .then(() => status("✅ 已复制", S_OK))
-      .catch(() => status("复制失败，请手动选中上面的订阅链接复制", S_WARN));
+  $("s-backup").onclick = () => {
+    try { downloadBackup(); status("✅ 已下载看板备份，不含令牌或 SendKey。", S_OK); }
+    catch (e) { status("❌ " + e.message, S_WARN); }
+  };
+  $("s-import").onclick = () => $("s-import-file").click();
+  $("s-import-file").onchange = async () => {
+    const file = $("s-import-file").files[0];
+    if (!file) return;
+    try {
+      await withHubTask(async () => {
+        if (file.size > 10 * 1024 * 1024) throw new Error("备份文件超过 10 MB，请选择看板导出的 JSON 文件");
+        const backup = validateBackup(JSON.parse(await file.text()));
+        const selectedCanvas = normalizeOrigin($("s-canvas").value, "Canvas 地址");
+        if (normalizeOrigin(backup.data.canvas_url, "备份学校地址") !== selectedCanvas)
+          throw new Error("备份的学校与当前设置不同，请先在“其他学校”选项中填写对应 Canvas 地址");
+        storeTogether({ hubData: JSON.stringify(backup.data), hubLastState: JSON.stringify(backup.state) });
+        boot(backup.data);
+        status("✅ 已导入 " + backup.data.weeks.length + " 份历史记录；令牌未导入，请填写自己的令牌。", S_OK);
+      });
+    } catch (e) { status("❌ 无法导入：" + e.message, S_WARN); }
+    finally { $("s-import-file").value = ""; }
   };
   $("s-clear").onclick = () => {
-    if (!confirm("确定清除本浏览器里的全部看板数据与令牌？（不会影响你的 Canvas 账号）")) return;
+    if (!confirm("确定清除本浏览器里的全部看板数据与令牌？这不会撤销 Canvas 令牌或云端订阅；如已启用订阅，请先点击“停用旧版云端订阅”。")) return;
     try {
     ["hubData", "hubLastState", "hubWorker", "hubCanvasUrl", "hubToken",
      "hubExpires", "hubSendKey", "hubSecret"].forEach((k) => HUB_STORE.del(k));
@@ -1338,8 +1322,8 @@ function showSetup() {
 
 function readSetup() {
   const g = (id) => (document.getElementById(id) ? document.getElementById(id).value.trim() : "");
-  return validateHubCfg({ worker: g("s-worker"), canvasUrl: g("s-canvas"), token: g("s-token"),
-    expires: g("s-exp"), sendkey: g("s-sendkey"), secret: hubCfg().secret });
+  return validateHubCfg({ worker: HUB_MANAGED_ORIGIN || g("s-worker"), canvasUrl: g("s-canvas"), token: g("s-token"),
+    expires: g("s-exp"), sendkey: "", secret: hubCfg().secret });
 }
 
 function saveSetup(inputCfg) {
@@ -1355,13 +1339,48 @@ function configValues(c) {
     hubExpires: c.expires || "", hubSendKey: c.sendkey || "", hubSecret: c.secret || "" };
 }
 
-function setIcsLink(url) {
-  const a = document.getElementById("ics-link");
-  if (!a) return;
-  a.href = url;
-  a.removeAttribute("download");
-  a.target = "_blank";
-  a.title = "订阅到手机日历（自动更新）";
+function validateBackup(value) {
+  const data = value && value.format === "canvas-weekly-hub-backup" && value.version === 1 && value.data;
+  if (!data || !Array.isArray(data.weeks) || !data.weeks.length || data.weeks.length > 52)
+    throw new Error("请选择本项目导出的看板备份文件（最多 52 份历史记录）");
+  normalizeOrigin(data.canvas_url, "备份学校地址");
+  for (const week of data.weeks) {
+    if (!week || !/^\d{4}-\d{2}-\d{2}$/.test(week.date) || !Array.isArray(week.courses))
+      throw new Error("备份周报格式不正确");
+    for (const course of week.courses) {
+      if (!course || ["new_assignments", "upcoming", "new_files", "announcements", "changes"]
+        .some((key) => !Array.isArray(course[key]) || course[key].some((item) => !item || typeof item !== "object")))
+        throw new Error("备份课程格式不正确");
+    }
+    if (week.warnings && (!Array.isArray(week.warnings) || week.warnings.some((item) => typeof item !== "string")))
+      throw new Error("备份警告格式不正确");
+  }
+  const state = value.state || { assignments: {} };
+  if (!state.assignments || typeof state.assignments !== "object" || Array.isArray(state.assignments))
+    throw new Error("备份快照格式不正确");
+  for (const course of Object.values(state.assignments)) {
+    if (!course || typeof course !== "object" || Array.isArray(course) ||
+        Object.values(course).some((item) => !item || typeof item !== "object" || Array.isArray(item)))
+      throw new Error("备份快照格式不正确");
+  }
+  // 仅导入明确的数据字段，忽略备份中额外的配置 / 凭证字段。
+  return { data: { site_title: data.site_title, canvas_url: data.canvas_url, username: data.username,
+    tz_label: data.tz_label, updated_at: data.updated_at, weeks: data.weeks }, state: { assignments: state.assignments } };
+}
+
+function buildBackup() {
+  let data, state;
+  try {
+    data = JSON.parse(HUB_STORE.get("hubData") || "null");
+    state = JSON.parse(HUB_STORE.get("hubLastState") || "null");
+  } catch (e) { throw new Error("本机数据损坏，请先重新抓取课程"); }
+  const clean = validateBackup({ format: "canvas-weekly-hub-backup", version: 1, data, state });
+  return { format: "canvas-weekly-hub-backup", version: 1, data: clean.data, state: clean.state };
+}
+
+function downloadBackup() {
+  triggerDownload(new Blob([JSON.stringify(buildBackup(), null, 2)], { type: "application/json;charset=utf-8" }),
+    fmtDate(new Date()) + "_Canvas看板备份_v1.json");
 }
 
 /* ---------------- 新手引导条 & 更新按钮 ---------------- */
@@ -1375,7 +1394,7 @@ function showFirstTip() {
   tip.innerHTML = `🎉 <b>看板已就绪！</b>常用三件事：
     ① 每周回来点一次顶部 <b>🔄</b> 更新数据；
     ② 顶部 <b>📅 截止日历</b> 可导入手机，到点自动提醒；
-    ③ <b>⚙️ 设置</b> 里可下载离线版「我的学习网站.html」和开启微信提醒。
+    ③ <b>⚙️ 设置</b> 里可下载离线版「我的学习网站.html」。
     <button title="知道了" style="margin-left:auto;flex:none">✕</button>`;
   tip.querySelector("button").onclick = () => {
     HUB_STORE.set("hubTipDone", "1");

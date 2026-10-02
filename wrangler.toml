@@ -1,15 +1,11 @@
 name = "canvas-weekly-hub"
 main = "worker.js"
-compatibility_date = "2024-09-01"
+compatibility_date = "2026-10-02"
 
-# 每日定时提醒（UTC 10:30 = 北京时间 18:30），配置了 Server酱 SendKey 才会实际推送
-[triggers]
-crons = ["30 10 * * *"]
-
-# 学生自部署时由 Cloudflare 自动创建；本地 wrangler 开发需先执行：
-#   npx wrangler kv namespace create HUB_KV
-[[kv_namespaces]]
-binding = "HUB_KV"
-
+# v2.2 不配置 KV、Cron 或微信推送。旧实例请按升级教程停用原定时器和 KV 配置。
 [vars]
 CANVAS_HOST = "canvas.cityu.edu.hk"
+
+# 不默认记录请求头、凭证或课程响应。
+[observability]
+enabled = false

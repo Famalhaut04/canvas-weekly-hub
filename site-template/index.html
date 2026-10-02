@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>我的学习中心 · Canvas 课程周报</title>
+<title>我的学习中心 · Canvas Weekly Hub v2.2</title>
 <style>
   :root {
     --bg: #f4f6fb; --panel: #fff; --panel-2: #fafbfe; --ink: #111827; --muted: #6b7280;
@@ -48,6 +48,7 @@
   .meta { max-width: 1060px; margin: 0 auto; padding: 0 18px 12px; font-size: .8rem;
           color: rgba(255,255,255,.85); display: flex; gap: 10px; flex-wrap: wrap; }
   .meta i { font-style: normal; opacity: .55; }
+  .meta a { color: #fff; text-decoration: underline; text-underline-offset: 3px; }
 
   /* ---------- 布局 ---------- */
   main { max-width: 1060px; margin: 22px auto 70px; padding: 0 18px; }
@@ -158,14 +159,14 @@
 <body>
 <header>
   <div class="bar">
-    <div class="brand">📚 我的学习中心 <small>Canvas 课程周报</small></div>
+    <div class="brand">📚 我的学习中心 <small>Canvas 课程周报 · v2.2</small></div>
     <div class="spacer"></div>
     <label class="search">🔍
       <input id="q" type="search" placeholder="搜索作业 / 资料 / 公告" autocomplete="off">
     </label>
     <a id="canvas-link" class="icon-btn" title="打开 Canvas" target="_blank" rel="noopener"
        style="display:grid;place-items:center;text-decoration:none">🎓</a>
-    <button id="engine-refresh-btn" class="icon-btn" title="立即抓取最新数据（约10~30秒，含课件下载与云端备份）" style="display:none">🔄</button>
+    <button id="engine-refresh-btn" class="icon-btn" title="按本地配置抓取最新数据" style="display:none">🔄</button>
     <button id="theme" class="icon-btn" title="切换深色 / 浅色">🌙</button>
   </div>
   <div class="meta">
@@ -173,6 +174,7 @@
     <span id="range"></span><i>·</i>
     <span id="tz-label">UTC+8</span><i>·</i>
     <a id="ics-link" href="deadlines.ics" download title="导入手机日历，截止前 2 小时提醒">📅 截止日历</a>
+    <a href="https://github.com/Famalhaut04/canvas-weekly-hub" target="_blank" rel="noopener noreferrer" title="在 GitHub 支持项目">☆ Star<span id="star-count"></span></a>
   </div>
 </header>
 
@@ -200,7 +202,7 @@
 </main>
 
 <footer>
-  每周五 19:00 由自动化任务抓取 Canvas 并推送 · 托管于 GitHub Pages
+  Canvas Weekly Hub v2.2 · 手动刷新 · 配置与历史由自己保管
 </footer>
 
 <script>
@@ -208,6 +210,15 @@
 const esc = s => String(s === null || s === undefined ? "" : s)
   .replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const $ = id => document.getElementById(id);
+// 备份内容不能把 javascript: / data: 注入链接；本地课件相对路径仍可使用。
+function safeHref(value) {
+  const s = String(value || "").trim();
+  if (/^https:\/\//i.test(s)) {
+    try { const u = new URL(s); return u.username || u.password ? "#" : esc(u.href); }
+    catch (e) { return "#"; }
+  }
+  return s && !/[\\\x00-\x20]/.test(s) && !/^\/\//.test(s) && !/^[^/]*:/.test(s) ? esc(s) : "#";
+}
 const HK = "Asia/Hong_Kong";
 const fmtHK = d => new Intl.DateTimeFormat("zh-CN", {
   timeZone: HK, month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false
@@ -242,20 +253,20 @@ const score = c => c.new_assignments.length * 3 + c.upcoming.length * 3 + c.new_
 
 /* ================= 渲染片段 ================= */
 const subChip = a => a.graded
-  ? `<span class="pill sub-ok">已评分 ${a.score ?? "-"}</span>`
+  ? `<span class="pill sub-ok">已评分 ${esc(a.score ?? "-")}</span>`
   : a.submitted === true ? `<span class="pill sub-ok">已提交</span>`
   : a.submitted === false ? `<span class="pill sub-no">未提交</span>` : "";
 
 function assignRow(a, showStatus) {
   const d = due(a.due_iso, a.due_at);
-  const pts = a.points === null || a.points === undefined ? "" : `<span class="pill pts">${a.points} 分</span>`;
+  const pts = a.points === null || a.points === undefined ? "" : `<span class="pill pts">${esc(a.points)} 分</span>`;
   const st = showStatus && a.status
-    ? `<span class="pill ${a.status === "新布置" ? "new" : "upd"}">${a.status}</span>` : "";
+    ? `<span class="pill ${a.status === "新布置" ? "new" : "upd"}">${esc(a.status)}</span>` : "";
   const icon = KIND_ICON[a.kind] || "📌";
   return `<div class="row">
     <span class="ico" title="${esc(a.kind || "任务")}">${icon}</span>
     <span class="grow">
-      <a href="${esc(a.url)}" target="_blank" rel="noopener">${esc(a.name)}</a>
+      <a href="${safeHref(a.url)}" target="_blank" rel="noopener">${esc(a.name)}</a>
       <span class="sub">${esc(a.kind || "任务")}</span>
     </span>
     ${pts}${subChip(a)}${st}
@@ -265,7 +276,7 @@ function assignRow(a, showStatus) {
 
 function fileCard(f, course) {
   const href = f.url || (course && course.url) || "#";
-  return `<a class="file" href="${esc(href)}" target="_blank" rel="noopener" title="${esc(f.name)}">
+  return `<a class="file" href="${safeHref(href)}" target="_blank" rel="noopener" title="${esc(f.name)}">
     <span class="fico">${FILE_ICON[f.kind] || "📎"}</span>
     <span style="min-width:0">
       <span class="fname">${esc(f.name)}</span>
@@ -293,7 +304,7 @@ function courseCard(c, open) {
   if (c.announcements.length)
     block.push(`<h4>📢 公告 <em>${c.announcements.length}</em></h4>
       <ul class="ann">${c.announcements.map(a => `<li>
-        ${a.url ? `<a href="${esc(a.url)}" target="_blank" rel="noopener">${esc(a.title)}</a>`
+        ${a.url ? `<a href="${safeHref(a.url)}" target="_blank" rel="noopener">${esc(a.title)}</a>`
                 : `<strong>${esc(a.title)}</strong>`}
         <span class="atext">（${esc(a.created_at)}）${esc(a.summary)}…</span></li>`).join("")}</ul>`);
 
@@ -312,7 +323,7 @@ function courseCard(c, open) {
       <span class="badges">${badges.join("")}<span class="caret">▶</span></span>
     </summary>
     <div class="body">${block.join("")}
-      ${c.url ? `<a class="course-link" href="${esc(c.url)}" target="_blank" rel="noopener">在 Canvas 中打开该课程 ↗</a>` : ""}
+      ${c.url ? `<a class="course-link" href="${safeHref(c.url)}" target="_blank" rel="noopener">在 Canvas 中打开该课程 ↗</a>` : ""}
     </div>
   </details>`;
 }
@@ -392,8 +403,8 @@ function render() {
         return `<div class="row">
           <span class="ico">${d.cls === "urgent" ? "🔴" : d.cls === "soon" ? "🟠" : d.cls === "over" ? "⚪" : "🟢"}</span>
           <span class="grow">
-            <a href="${esc(a.url)}" target="_blank" rel="noopener">${esc(a.name)}</a>
-            <span class="sub">${esc(a.course)}${a.points !== null && a.points !== undefined ? " · " + a.points + " 分" : ""}</span>
+            <a href="${safeHref(a.url)}" target="_blank" rel="noopener">${esc(a.name)}</a>
+            <span class="sub">${esc(a.course)}${a.points !== null && a.points !== undefined ? " · " + esc(a.points) + " 分" : ""}</span>
           </span>
           ${subChip(a)}
           <span class="tail"><span class="due ${d.cls}">${esc(d.when)}${d.label ? `<span>${d.label}</span>` : ""}</span></span>
@@ -415,8 +426,8 @@ function render() {
         return `<div class="row">
           <span class="ico" title="${esc(a.kind || "")}">${KIND_ICON[a.kind] || "📌"}</span>
           <span class="grow">
-            <a href="${esc(a.url)}" target="_blank" rel="noopener">${esc(a.name)}</a>
-            <span class="sub">${esc(c.name)}${a.points !== null && a.points !== undefined ? " · " + a.points + " 分" : ""}</span>
+            <a href="${safeHref(a.url)}" target="_blank" rel="noopener">${esc(a.name)}</a>
+            <span class="sub">${esc(c.name)}${a.points !== null && a.points !== undefined ? " · " + esc(a.points) + " 分" : ""}</span>
           </span>
           ${subChip(a)}
           <span class="tail"><span class="due ${d.cls}">${esc(d.when)}${d.label ? `<span>${d.label}</span>` : ""}</span></span>
@@ -460,7 +471,7 @@ function renderSearch(q) {
     out.push(hits.assign.map(({ a, c, w }) => {
       const d = due(a.due_iso, a.due_at);
       return `<div class="row"><span class="ico">${KIND_ICON[a.kind] || "📌"}</span>
-        <span class="grow"><a href="${esc(a.url)}" target="_blank" rel="noopener">${esc(a.name)}</a>
+        <span class="grow"><a href="${safeHref(a.url)}" target="_blank" rel="noopener">${esc(a.name)}</a>
         <span class="sub">${esc(c.name)} · <span class="hit-week">周报 ${esc(w.date)}</span></span></span>
         <span class="tail"><span class="due ${d.cls}">${esc(d.when)}${d.label ? `<span>${d.label}</span>` : ""}</span></span></div>`;
     }).join(""));
@@ -473,7 +484,7 @@ function renderSearch(q) {
   if (hits.ann.length) {
     out.push(`<h4 style="font-size:.85rem;color:var(--brand);margin:14px 0 2px">公告</h4>`);
     out.push(`<ul class="ann">${hits.ann.map(({ x, c, w }) => `<li>
-      ${x.url ? `<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.title)}</a>` : `<strong>${esc(x.title)}</strong>`}
+      ${x.url ? `<a href="${safeHref(x.url)}" target="_blank" rel="noopener">${esc(x.title)}</a>` : `<strong>${esc(x.title)}</strong>`}
       <span class="atext">（${esc(x.created_at)} · ${esc(c.name)} · 周报 ${esc(w.date)}）${esc(x.summary)}…</span></li>`).join("")}</ul>`);
   }
   out.push(`</div>`);
