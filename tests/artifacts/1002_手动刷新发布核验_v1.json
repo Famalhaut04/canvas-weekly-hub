@@ -1,0 +1,53 @@
+{
+  "verified_at": "2026-10-02T19:51:33.508949+08:00",
+  "commit": "1bc41c2bc0df150c9fa8781f5790d599c76ebc6f",
+  "main": "1bc41c2bc0df150c9fa8781f5790d599c76ebc6f",
+  "version": "2.2",
+  "tag_commit": "e30ce1879d5b4c9b07c2628839573a618a46fe43",
+  "release": "https://github.com/Famalhaut04/canvas-weekly-hub/releases/tag/v2.2",
+  "release_name": "v2.2 · 手动刷新与更新提醒",
+  "pages_build": {
+    "status": "built",
+    "commit": "1bc41c2bc0df150c9fa8781f5790d599c76ebc6f",
+    "created_at": "2026-10-02T11:49:22Z",
+    "updated_at": "2026-10-02T11:49:42Z"
+  },
+  "pages": {
+    "web/index.html": {
+      "url": "https://famalhaut04.github.io/canvas-weekly-hub/web/",
+      "status": 200,
+      "sha256_lf": "41430cf21770cbdf861e36b9d48c0b14d8cb12311fc1aa0d81c84c5895fd0589"
+    },
+    "web/overview.html": {
+      "url": "https://famalhaut04.github.io/canvas-weekly-hub/web/overview.html",
+      "status": 200,
+      "sha256_lf": "45563b30290318ecf15ad5ab10f29a05539b243a99ee0a50a75d095f87df4c44"
+    },
+    "worker.js": {
+      "url": "https://famalhaut04.github.io/canvas-weekly-hub/worker.js",
+      "status": 200,
+      "sha256_lf": "123ec59e20043d944d04a8530f6d2438d33493e70fd97459d90fc324567629ac"
+    }
+  },
+  "assets": {
+    "worker.js": {
+      "url": "https://github.com/Famalhaut04/canvas-weekly-hub/releases/download/v2.2/worker.js",
+      "size": 143707,
+      "sha256": "00df9e697ae4285f1eeecb36560f8944129ece5d135b6147d84168ea6bf8b4de",
+      "digest": "sha256:00df9e697ae4285f1eeecb36560f8944129ece5d135b6147d84168ea6bf8b4de"
+    },
+    "canvas-weekly-hub-v2.2-source.zip": {
+      "url": "https://github.com/Famalhaut04/canvas-weekly-hub/releases/download/v2.2/canvas-weekly-hub-v2.2-source.zip",
+      "size": 3534553,
+      "sha256": "4147ef7ddcf1eb29ffa5ea4f45fa49a14c2bdc467f3cadff7f88f57008e5858c",
+      "digest": "sha256:4147ef7ddcf1eb29ffa5ea4f45fa49a14c2bdc467f3cadff7f88f57008e5858c"
+    }
+  },
+  "source_zip": {
+    "file_count": 94,
+    "personal_artifacts_excluded": true,
+    "sample_token_empty": true,
+    "push_enabled": false,
+    "core_sources_match": true
+  }
+}
