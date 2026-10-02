@@ -431,6 +431,10 @@ function showSetup() {
       <button class="btn" id="s-close" aria-label="关闭设置">✕</button>
     </div>
     <p class="hint">${HUB_MANAGED_ORIGIN ? "助手已就绪。粘贴自己的 Canvas 令牌，点击下方按钮即可生成看板。" : "先创建属于自己的网页。之后只需填 Canvas 令牌，不用配置代理地址。"}</p>
+    <div class="bar">
+      <a class="btn" id="s-cityu-login" href="https://canvas.cityu.edu.hk/" target="_blank" rel="noopener noreferrer">登录城大 Canvas ↗</a>
+    </div>
+    <p class="hint">先登录学校 Canvas，再到“账户 → 设置”获取访问令牌。</p>
 
     <section id="s-deploy" ${HUB_MANAGED_ORIGIN ? "hidden" : ""} class="fstep">
       <div class="fstep-h">第一次使用：选择一种创建方式</div>
