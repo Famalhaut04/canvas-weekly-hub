@@ -446,7 +446,7 @@ function showSetup() {
     <div class="bar">
       <a class="btn" id="s-cityu-login" href="https://canvas.cityu.edu.hk/" target="_blank" rel="noopener noreferrer">登录城大 Canvas ↗</a>
     </div>
-    <p class="hint">先确认学校允许个人 API 使用，再登录学校 Canvas，到“账户 → 设置”获取访问令牌。</p>
+    <p class="hint">登录学校 Canvas，到“账户 → 设置”获取访问令牌。</p>
     <div class="bar" aria-label="选择配置方式">
       <button class="btn primary" id="s-web-entry" aria-controls="s-web-panel" aria-expanded="true">基础版</button>
       <button class="btn" id="s-agent-entry" aria-controls="s-agent-panel" aria-expanded="false">升级版</button>
