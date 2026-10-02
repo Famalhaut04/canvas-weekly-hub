@@ -1,0 +1,101 @@
+{
+  "package_files": {
+    "worker.js": {
+      "bytes": 131138,
+      "sha256_raw": "7cd852d8eea3eafe8a6ecb19c402ebd09525e3359a100f0ea153f965220d7d95",
+      "sha256_utf8_lf": "4c91d2ae8fd0e3c4394f73a5c6370dab369e9caa6314d2fab059bc3147e831bd"
+    },
+    "canvas-weekly-hub-v2.2-source.zip": {
+      "bytes": 2231656,
+      "sha256_raw": "9d7a02a2cb27d3b786bbbceec5670b068f555d42563a49d405ba2b1d0486bc1f"
+    }
+  },
+  "source_commit": "522f1bba659fb794414f5e83983a7ab80995ef66",
+  "public_files": [
+    {
+      "checked_utc": "2026-10-02T10:31:20.6655876Z",
+      "matches_local": true,
+      "upgraded": true,
+      "file": "web/index.html",
+      "sha256_utf8_lf": "3cf7816eb6a6de0a64056797c857adc9e36b7a91b18bdb0ae684b29a61259112",
+      "basic": true,
+      "url": "https://famalhaut04.github.io/canvas-weekly-hub/web/",
+      "http": 200
+    },
+    {
+      "checked_utc": "2026-10-02T10:31:21.3779608Z",
+      "matches_local": true,
+      "upgraded": true,
+      "file": "web/overview.html",
+      "sha256_utf8_lf": "444565e9b148d0dda83e7df6a678ba583bc6871861c3c960e846851e31bf39d8",
+      "basic": true,
+      "url": "https://famalhaut04.github.io/canvas-weekly-hub/web/overview.html",
+      "http": 200
+    },
+    {
+      "checked_utc": "2026-10-02T10:31:21.7939655Z",
+      "matches_local": true,
+      "upgraded": true,
+      "file": "worker.js",
+      "sha256_utf8_lf": "4c91d2ae8fd0e3c4394f73a5c6370dab369e9caa6314d2fab059bc3147e831bd",
+      "basic": true,
+      "url": "https://famalhaut04.github.io/canvas-weekly-hub/worker.js",
+      "http": 200
+    }
+  ],
+  "tag_v2_2_commit": "e30ce1879d5b4c9b07c2628839573a618a46fe43",
+  "timezone": "Asia/Shanghai",
+  "release_assets": [
+    {
+      "matches_github_digest": true,
+      "name": "canvas-weekly-hub-v2.2-source.zip",
+      "url": "https://github.com/Famalhaut04/canvas-weekly-hub/releases/download/v2.2/canvas-weekly-hub-v2.2-source.zip",
+      "sha256_raw": "9d7a02a2cb27d3b786bbbceec5670b068f555d42563a49d405ba2b1d0486bc1f",
+      "bytes": 2231656,
+      "matches_local": true,
+      "github_digest": "sha256:9d7a02a2cb27d3b786bbbceec5670b068f555d42563a49d405ba2b1d0486bc1f"
+    },
+    {
+      "matches_github_digest": true,
+      "name": "worker.js",
+      "url": "https://github.com/Famalhaut04/canvas-weekly-hub/releases/download/v2.2/worker.js",
+      "sha256_raw": "7cd852d8eea3eafe8a6ecb19c402ebd09525e3359a100f0ea153f965220d7d95",
+      "bytes": 131138,
+      "matches_local": true,
+      "github_digest": "sha256:7cd852d8eea3eafe8a6ecb19c402ebd09525e3359a100f0ea153f965220d7d95"
+    }
+  ],
+  "checked_utc": "2026-10-02T10:33:19.4378778Z",
+  "pages_build": {
+    "url": "https://api.github.com/repos/Famalhaut04/canvas-weekly-hub/pages/builds/1254782054",
+    "status": "built",
+    "error": {
+      "message": null
+    },
+    "pusher": {
+      "login": "Famalhaut04",
+      "id": 118148765,
+      "node_id": "U_kgDOBwrOnQ",
+      "avatar_url": "https://avatars.githubusercontent.com/u/118148765?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/Famalhaut04",
+      "html_url": "https://github.com/Famalhaut04",
+      "followers_url": "https://api.github.com/users/Famalhaut04/followers",
+      "following_url": "https://api.github.com/users/Famalhaut04/following{/other_user}",
+      "gists_url": "https://api.github.com/users/Famalhaut04/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/Famalhaut04/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/Famalhaut04/subscriptions",
+      "organizations_url": "https://api.github.com/users/Famalhaut04/orgs",
+      "repos_url": "https://api.github.com/users/Famalhaut04/repos",
+      "events_url": "https://api.github.com/users/Famalhaut04/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/Famalhaut04/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "commit": "522f1bba659fb794414f5e83983a7ab80995ef66",
+    "duration": 102611,
+    "created_at": "2026-10-02T10:29:25Z",
+    "updated_at": "2026-10-02T10:31:07Z"
+  }
+}
