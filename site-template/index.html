@@ -364,6 +364,18 @@ function render() {
   $("updated").textContent = "最近更新：" + (DATA.updated_at || w.generated_at || "—");
   $("tz-label").textContent = DATA.tz_label || "UTC+8";
   $("range").textContent = "统计范围 " + (w.range || "过去 7 天");
+  let warning = document.getElementById("fetch-warnings");
+  if (!warning) {
+    warning = document.createElement("div");
+    warning.id = "fetch-warnings";
+    warning.className = "panel";
+    warning.setAttribute("role", "status");
+    $("stats").before(warning);
+  }
+  warning.style.display = w.warnings && w.warnings.length ? "" : "none";
+  warning.innerHTML = (w.warnings || []).length
+    ? "<strong>⚠️ 部分课程内容未能读取，可稍后刷新重试</strong><ul>" +
+      w.warnings.map((s) => "<li>" + esc(s) + "</li>").join("") + "</ul>" : "";
 
   const cn = (k) => (w.courses || []).reduce((s, c) => s + c[k].length, 0);
   const todo = allTodo(w);

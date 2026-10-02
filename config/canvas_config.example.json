@@ -6,10 +6,10 @@
   "tz_offset_hours": 8,
   "term_filter": "",
   "github": {
-    "username": "你的GitHub用户名",
+    "username": "",
     "repo_name": "learning-hub",
-    "repo_dir": "D:/canvas/site-repo/learning-hub",
-    "push_enabled": true
+    "repo_dir": "",
+    "push_enabled": false
   },
   "token_expires_at": "",
   "token_remind_days": 5,

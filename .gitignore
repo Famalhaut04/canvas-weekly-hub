@@ -18,6 +18,7 @@ Thumbs.db
 # 本地生成的个人数据
 downloads/
 last_state.json
+data.json
 deadlines.ics
 
 # 打包产物
@@ -26,3 +27,7 @@ dist/
 *.spec
 hub_home.json
 我的学习网站.html
+
+# 离线回归和浏览器验证生成的临时目录
+tests/*.tmp/
+tests/artifacts/*.tmp/

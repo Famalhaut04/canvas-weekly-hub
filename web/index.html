@@ -103,9 +103,12 @@
     z-index: 50; display: flex; align-items: flex-start; justify-content: center;
     padding: 40px 14px; overflow: auto; }
   #setup-overlay .modal { background: var(--panel); color: var(--ink); border: 1px solid var(--line);
-    border-radius: 16px; width: 100%; max-width: 760px; padding: 20px 22px;
+    border-radius: 16px; width: 100%; min-width: 0; max-width: 760px; padding: 20px 22px;
+    overflow-wrap: anywhere;
     box-shadow: 0 18px 50px rgba(0,0,0,.35); }
-  #setup-overlay h3 { font-size: 1.1rem; margin-bottom: 4px; }
+  #setup-overlay h3 { font-size: 1.1rem; margin-bottom: 4px; min-width: 0; }
+  #setup-overlay .setup-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  #setup-overlay .setup-head .btn { flex-shrink: 0; }
   #setup-overlay .frow { display: flex; gap: 8px; align-items: center; margin: 9px 0; flex-wrap: wrap; }
   #setup-overlay .frow label { width: 128px; font-size: .9rem; color: var(--muted); }
   #setup-overlay input { flex: 1; min-width: 200px; padding: 7px 10px; border: 1px solid var(--line);
@@ -116,6 +119,7 @@
     background: var(--panel-2); color: var(--ink); cursor: pointer; font: inherit; }
   #setup-overlay .btn.primary { background: var(--brand); color: #fff; border-color: var(--brand); font-weight: 600; }
   #setup-overlay .btn:hover { filter: brightness(1.08); }
+  #setup-overlay .btn:disabled { opacity: .65; cursor: wait; }
   #setup-overlay .status { font-size: .85rem; margin-top: 8px; white-space: pre-wrap; min-height: 1.2em; }
   #setup-overlay a { color: var(--brand-2); }
   .subbox { background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px;
@@ -411,6 +415,18 @@ function render() {
   $("updated").textContent = "最近更新：" + (DATA.updated_at || w.generated_at || "—");
   $("tz-label").textContent = DATA.tz_label || "UTC+8";
   $("range").textContent = "统计范围 " + (w.range || "过去 7 天");
+  let warning = document.getElementById("fetch-warnings");
+  if (!warning) {
+    warning = document.createElement("div");
+    warning.id = "fetch-warnings";
+    warning.className = "panel";
+    warning.setAttribute("role", "status");
+    $("stats").before(warning);
+  }
+  warning.style.display = w.warnings && w.warnings.length ? "" : "none";
+  warning.innerHTML = (w.warnings || []).length
+    ? "<strong>⚠️ 部分课程内容未能读取，可稍后刷新重试</strong><ul>" +
+      w.warnings.map((s) => "<li>" + esc(s) + "</li>").join("") + "</ul>" : "";
 
   const cn = (k) => (w.courses || []).reduce((s, c) => s + c[k].length, 0);
   const todo = allTodo(w);
@@ -627,9 +643,84 @@ const WEBSITE_FILE = "我的学习网站.html";
 
 const HUB_STORE = {
   get(k, d) { try { return localStorage.getItem(k) ?? d; } catch (e) { return d; } },
-  set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} },
-  del(k) { try { localStorage.removeItem(k); } catch (e) {} },
+  set(k, v) {
+    try { localStorage.setItem(k, v); }
+    catch (e) { throw new Error("浏览器无法保存数据：存储已禁用或空间不足。请允许本站存储或换用其他浏览器。"); }
+  },
+  del(k) { localStorage.removeItem(k); },
 };
+
+// 一组相关数据一起保存，失败时尽量恢复旧值，避免看板与快照不一致。
+function storeTogether(values) {
+  const old = {};
+  try {
+    for (const k of Object.keys(values)) old[k] = localStorage.getItem(k);
+  } catch (e) { throw new Error("无法读取浏览器存储，请允许本站存储后重试。"); }
+  try {
+    for (const k of Object.keys(values)) HUB_STORE.set(k, values[k]);
+  } catch (e) {
+    for (const k of Object.keys(old)) {
+      try { old[k] === null ? localStorage.removeItem(k) : localStorage.setItem(k, old[k]); }
+      catch (restoreError) { /* 保留最初的存储错误供用户处理 */ }
+    }
+    throw e;
+  }
+}
+
+function normalizeOrigin(value, label) {
+  let u;
+  try { u = new URL(String(value || "").trim()); }
+  catch (e) { throw new Error(label + "应是完整的 HTTPS 地址，例如 https://canvas.cityu.edu.hk"); }
+  if (u.protocol !== "https:" || !u.hostname || u.username || u.password || u.search || u.hash ||
+      !["", "/"].includes(u.pathname)) {
+    throw new Error(label + "只需填写 HTTPS 站点地址，不要附带页面路径、账号或查询参数");
+  }
+  return u.origin;
+}
+
+function validateHubCfg(cfg) {
+  const c = Object.assign({}, cfg);
+  c.worker = normalizeOrigin(c.worker, "小助手地址");
+  c.canvasUrl = normalizeOrigin(c.canvasUrl, "Canvas 地址");
+  c.token = String(c.token || "").trim();
+  if (!c.token || /\s/.test(c.token)) throw new Error("请填写完整的 Canvas 访问令牌，不要带空格或换行");
+  if (c.expires) {
+    const d = new Date(c.expires + "T00:00:00Z");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(c.expires) || isNaN(d) || d.toISOString().slice(0, 10) !== c.expires)
+      throw new Error("令牌到期日应是有效日期，格式为 YYYY-MM-DD");
+  }
+  return c;
+}
+
+async function requestText(url, options) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 20000);
+  try {
+    const response = await fetch(url, Object.assign({}, options || {}, { signal: controller.signal }));
+    const body = await response.text();
+    return { response, body };
+  } catch (e) {
+    if (controller.signal.aborted) throw new Error("请求超过 20 秒，请检查网络和小助手地址后重试");
+    if (e instanceof TypeError) throw new Error("网络连接失败，请检查网络、小助手地址和跨域设置");
+    throw e;
+  } finally { clearTimeout(timer); }
+}
+
+let hubBusy = false;
+async function withHubTask(action) {
+  if (hubBusy) throw new Error("已有操作正在进行，请等待完成后再试");
+  hubBusy = true;
+  const ids = ["s-test", "s-fetch", "s-sub", "s-close", "s-close2", "s-clear", "refresh-btn"];
+  ids.push("s-worker", "s-canvas", "s-token", "s-exp", "s-sendkey");
+  const buttons = ids.map((id) => document.getElementById(id)).filter(Boolean);
+  const disabled = buttons.map((b) => b.disabled);
+  buttons.forEach((b) => { b.disabled = true; });
+  try { return await action(); }
+  finally {
+    hubBusy = false;
+    buttons.forEach((b, i) => { b.disabled = disabled[i]; });
+  }
+}
 
 function hubCfg() {
   return {
@@ -643,7 +734,7 @@ function hubCfg() {
 }
 
 function hostOf(url) {
-  try { return new URL(url).host; } catch (e) { return "canvas.cityu.edu.hk"; }
+  return new URL(normalizeOrigin(url, "Canvas 地址")).host;
 }
 
 function tzLabel() {
@@ -659,18 +750,16 @@ function fmtLocal(d) {
 
 /* ---------------- Canvas 抓取（经学生自己的 Worker 转发） ---------------- */
 
-function workerApi(path, params) {
-  const c = hubCfg();
-  if (!c.worker) throw new Error("请先填写 Worker 地址（第①项）");
+function workerApi(path, params, cfg) {
+  const c = validateHubCfg(cfg || hubCfg());
   const u = c.worker.replace(/\/+$/, "") + "/proxy/" + path.replace(/^\/+/, "");
   const qs = new URLSearchParams(params || {});
-  return fetch(u + "?" + qs, {
+  return requestText(u + "?" + qs, {
     headers: { "X-Canvas-Token": c.token, "X-Canvas-Host": hostOf(c.canvasUrl) },
-  }).then(async (r) => {
-    const body = await r.text();
+  }).then(({ response: r, body }) => {
     const clean = body.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
     const jsonMsg = (() => { try { const j = JSON.parse(body);
-      return (j.message || (j.errors && j.errors[0] && j.errors[0].message)) || ""; }
+      return (j.error || j.message || (j.errors && j.errors[0] && j.errors[0].message)) || ""; }
       catch (e) { return ""; } })();
     if (r.status === 401) throw new Error("令牌无效或已过期（HTTP 401）：请到 Canvas 重新生成");
     if (r.status === 403) {
@@ -682,16 +771,19 @@ function workerApi(path, params) {
     }
     if (!r.ok) throw new Error("Canvas API HTTP " + r.status + (jsonMsg ? "：" + jsonMsg :
       clean ? "：" + clean.slice(0, 140) : "") + " @ " + path);
-    return JSON.parse(body);
+    try { return JSON.parse(body); }
+    catch (e) { throw new Error("小助手返回了非 JSON 数据，请检查是否部署了本项目代码"); }
   });
 }
 
-async function apiAll(path, params) {
+async function apiAll(path, params, cfg) {
   let page = 1, out = [];
   for (;;) {
-    const arr = await workerApi(path, Object.assign({}, params || {}, { per_page: 100, page: page }));
-    out = out.concat(Array.isArray(arr) ? arr : [arr]);
-    if (!Array.isArray(arr) || arr.length < 100 || page >= 20) break;
+    const arr = await workerApi(path, Object.assign({}, params || {}, { per_page: 100, page: page }), cfg);
+    if (!Array.isArray(arr)) throw new Error("Canvas 列表格式异常，本次数据未保存：" + path);
+    out = out.concat(arr);
+    if (arr.length < 100) break;
+    if (page >= 20) throw new Error("数据达到分页上限，本次数据未保存：" + path);
     page += 1;
   }
   return out;
@@ -723,10 +815,12 @@ function fileKind(name) {
 
 /* ---------------- 抓取并生成看板 ---------------- */
 
-async function fetchAll() {
-  const cfg = hubCfg();
-  if (!cfg.token) throw new Error("请先填写访问令牌");
-  const courses = await apiAll("courses", { enrollment_state: "active", "include[]": "term" });
+async function fetchAll(inputCfg, progress) {
+  const cfg = validateHubCfg(inputCfg || hubCfg());
+  const report = progress || (() => {});
+  report("正在读取课程列表…");
+  const courses = await apiAll("courses", { enrollment_state: "active", "include[]": "term" }, cfg);
+  const warnings = [];
 
   let lastState = null;
   try { lastState = JSON.parse(HUB_STORE.get("hubLastState") || "null"); } catch (e) {}
@@ -742,11 +836,15 @@ async function fetchAll() {
     const name = c.name || ("课程" + cid);
     const code = c.course_code || "";
     const term = (c.term || {}).name || "";
+    report("正在抓取 " + (weekCourses.length + 1) + "/" + courses.length + "：" + name);
+    const optional = (path, params, label) => apiAll(path, params, cfg).catch((e) => {
+      warnings.push(name + "：" + label + "未能读取（" + e.message + "）");
+      return [];
+    });
     const [assignments, files, anns] = await Promise.all([
-      apiAll("courses/" + cid + "/assignments", { order_by: "due_at", "include[]": "submission" })
-        .catch(() => []),
-      apiAll("courses/" + cid + "/files", { sort: "created_at", order: "desc" }).catch(() => []),
-      apiAll("courses/" + cid + "/announcements", {}).catch(() => []),
+      apiAll("courses/" + cid + "/assignments", { order_by: "due_at", "include[]": "submission" }, cfg),
+      optional("courses/" + cid + "/files", { sort: "created_at", order: "desc" }, "课件"),
+      optional("courses/" + cid + "/announcements", {}, "公告"),
     ]);
 
     const courseState = {};
@@ -768,7 +866,7 @@ async function fetchAll() {
       if (prev) {
         if (prev.due_iso && prev.due_iso !== courseState[aid].due_iso) {
           changes.push({ type: "改期", name: a.name || "未命名任务",
-            detail: "截止时间 " + fmtPrev(prev.due_iso) + " → " + fmtLocal(due) });
+            detail: "截止时间 " + fmtPrev(prev.due_iso) + " → " + (due ? fmtLocal(due) : "无截止时间") });
         }
         if (prev.wf !== "graded" && graded) {
           changes.push({ type: "新评分", name: a.name || "未命名任务",
@@ -824,13 +922,10 @@ async function fetchAll() {
       new_files: newFiles, announcements: newAnns, changes: changes });
   }
 
-  // 与上次快照对比已完成；保存新快照
-  HUB_STORE.set("hubLastState", JSON.stringify(newState));
-
   const week = {
     date: fmtDate(now), generated_at: fmtLocal(now),
     range: fmtDate(new Date(now.getTime() - 7 * 86400000)) + " ~ " + fmtDate(now),
-    courses: weekCourses,
+    courses: weekCourses, warnings: warnings,
   };
 
   // 合并历史（最多 52 周）
@@ -842,7 +937,9 @@ async function fetchAll() {
     site_title: "我的学习中心", canvas_url: cfg.canvasUrl, username: "",
     tz_label: tzLabel(), updated_at: week.generated_at, weeks: weeks.slice(0, 52),
   };
-  HUB_STORE.set("hubData", JSON.stringify(payload));
+  storeTogether(Object.assign({}, inputCfg ? configValues(cfg) : {}, {
+    hubData: JSON.stringify(payload), hubLastState: JSON.stringify(newState),
+  }));
   return payload;
 }
 
@@ -948,17 +1045,28 @@ function genSecret() {
 
 function showSetup() {
   let ov = document.getElementById("setup-overlay");
-  if (ov) { ov.style.display = "flex"; return; }
+  if (ov) {
+    const saved = hubCfg();
+    const fields = { "s-worker": "worker", "s-canvas": "canvasUrl", "s-token": "token",
+                     "s-exp": "expires", "s-sendkey": "sendkey" };
+    for (const id of Object.keys(fields)) $(id).value = saved[fields[id]];
+    $("s-status").textContent = "";
+    $("worker-check").textContent = "";
+    $("s-capabilities").textContent = "订阅需要 KV 存储；测试连接时会检查是否可用。";
+    ov.style.display = "flex";
+    $("s-worker").dispatchEvent(new Event("input"));
+    return;
+  }
   ov = document.createElement("div");
   ov.id = "setup-overlay";
   const cfg = hubCfg();
   ov.innerHTML = `
-  <div class="modal">
-    <div style="display:flex;align-items:center;gap:8px">
-      <h3 style="flex:1">⚙️ 首次使用 · 三步完成（约 5 分钟，全程只用鼠标）</h3>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="setup-title">
+    <div class="setup-head">
+      <h3 id="setup-title" style="flex:1">⚙️ 设置 · 三步完成</h3>
       <a class="btn" href="https://github.com/Famalhaut04/canvas-weekly-hub/blob/main/docs/Cloudflare%E9%83%A8%E7%BD%B2%E5%9B%BE%E6%96%87%E6%95%99%E7%A8%8B.md"
          target="_blank" rel="noopener">📖 图文教程</a>
-      <button class="btn" id="s-close">✕</button>
+      <button class="btn" id="s-close" aria-label="关闭设置">✕</button>
     </div>
 
     <div class="fstep">
@@ -976,8 +1084,9 @@ function showSetup() {
         <a href="https://github.com/Famalhaut04/canvas-weekly-hub/blob/main/docs/Cloudflare%E9%83%A8%E7%BD%B2%E5%9B%BE%E6%96%87%E6%95%99%E7%A8%8B.md"
            target="_blank" rel="noopener">📖 卡住了？零基础分步指南（每步都有完成标志）</a>
       </div>
-      <div class="frow"><label>小助手地址</label>
-        <input id="s-worker" placeholder="https://canvas-weekly-hub.你的子域.workers.dev"></div>
+      <div class="frow"><label for="s-worker">小助手地址</label>
+        <input id="s-worker" type="url" autocomplete="off" spellcheck="false" placeholder="https://canvas-weekly-hub.你的子域.workers.dev"></div>
+      <p class="hint">也支持你绑定的 HTTPS 自定义域名，只填站点地址。</p>
       <details class="faq"><summary>更省事的「一键部署」版（需要 GitHub 账号；自动配置提醒功能所需的存储）</summary>
         <p class="hint">点 <a href="https://deploy.workers.cloudflare.com/?url=https://github.com/Famalhaut04/canvas-weekly-hub"
         target="_blank" rel="noopener">🚀 一键部署 ↗</a> → 按提示登录 Cloudflare 与 GitHub → 点 <b>Create and Deploy</b> →
@@ -988,8 +1097,8 @@ function showSetup() {
 
     <div class="fstep">
       <div class="fstep-h">❷ 绑定你的 Canvas 令牌（约 1 分钟）</div>
-      <div class="frow"><label>Canvas 地址</label><input id="s-canvas" placeholder="https://canvas.cityu.edu.hk"></div>
-      <div class="frow"><label>访问令牌</label><input id="s-token" type="password"
+      <div class="frow"><label for="s-canvas">Canvas 地址</label><input id="s-canvas" type="url" spellcheck="false" placeholder="https://canvas.cityu.edu.hk"></div>
+      <div class="frow"><label for="s-token">访问令牌</label><input id="s-token" type="password" autocomplete="off" spellcheck="false"
         placeholder="登录 Canvas 后生成，获取方法点下面的折叠说明"></div>
       <details class="faq"><summary>❓ 如何获取令牌？（约 1 分钟，只在第一次需要）</summary>
         <p class="hint">1) 登录 Canvas（<a href="https://canvas.cityu.edu.hk/profile/settings" target="_blank" rel="noopener">直达令牌生成页 ↗</a>，如提示登录先用学校账号登录）；
@@ -998,12 +1107,13 @@ function showSetup() {
         4) 目的随便填（如 weekly-report），点 <b>生成</b> → <b>立刻复制</b>（只显示这一次）粘贴到上面；
         5) 城大令牌最长 90 天——把生成页显示的到期日填到下面④，<b>剩 5 天会自动提醒你更换</b>。</p>
       </details>
-      <div class="frow"><label>令牌到期日</label><input id="s-exp" placeholder="YYYY-MM-DD，选填但强烈建议填写"></div>
+      <div class="frow"><label for="s-exp">令牌到期日</label><input id="s-exp" type="date"></div>
+      <p class="hint">到期日选填。测试连接成功后保存；关闭设置会放弃未保存的输入。</p>
       <div class="frow"><label></label>
         <button class="btn primary" id="s-test">🔌 测试连接</button>
         <span style="font-size:.8rem;color:var(--muted)">显示 ✅ 后再进行第 ❸ 步</span>
       </div>
-      <div class="status" id="s-status"></div>
+      <div class="status" id="s-status" role="status" aria-live="polite"></div>
     </div>
 
     <div class="fstep">
@@ -1016,7 +1126,10 @@ function showSetup() {
         <button class="btn" id="s-sub">📅 启用日历订阅 / 微信提醒</button>
         <span style="font-size:.8rem;color:var(--muted)">手机日历自动提醒截止；微信每天 18:30 推送待办</span>
       </div>
-      <div class="frow"><label>微信 SendKey</label><input id="s-sendkey" type="password"
+      <p class="hint" id="s-capabilities">订阅需要 KV 存储；测试连接时会检查是否可用。</p>
+      <p class="hint">普通看板只在浏览器保存令牌；启用订阅会把令牌保存到你自己 Worker 的 KV。
+        订阅链接含访问密钥，请勿公开分享。微信提醒还需要配置 Worker 定时触发器。</p>
+      <div class="frow"><label for="s-sendkey">微信 SendKey</label><input id="s-sendkey" type="password" autocomplete="off"
         placeholder="可选，在 sct.ftqq.com 免费获取"></div>
       <div class="frow"><label></label>
         <button class="btn" id="s-dlsite">⬇️ 下载离线版「我的学习网站.html」</button>
@@ -1060,50 +1173,85 @@ function showSetup() {
   };
   const S_WARN = "#c0392b", S_OK = "#0f8a4f";
 
+  const showCapabilities = (info) => {
+    const el = $("s-capabilities");
+    if (!info.capabilities || typeof info.capabilities.subscriptions !== "boolean") {
+      el.textContent = "小助手使用旧版代码，无法预检 KV；看板可用，订阅需自行确认 KV 和定时触发器。";
+    } else {
+      el.textContent = info.capabilities.subscriptions
+        ? "✅ 已绑定 KV，可以启用日历订阅；微信提醒还需设置每天 18:30 的定时触发器。"
+        : "ℹ️ 未绑定 KV：可以生成看板和下载日历；订阅 / 微信提醒请先按图文教程绑定 HUB_KV。";
+    }
+  };
+  const checkWorker = async (c) => {
+    const { response, body } = await requestText(c.worker + "/");
+    let info;
+    try { info = JSON.parse(body); } catch (e) { /* 下面提供统一提示 */ }
+    if (!response.ok || !info || info.name !== "canvas-weekly-hub proxy" || info.ok !== true)
+      throw new Error("小助手代码不正确：请在 Cloudflare 全选替换为本项目 Worker 代码并 Deploy");
+    showCapabilities(info);
+    return info;
+  };
+
   $("s-close").onclick = () => { ov.style.display = "none"; };
   $("s-close2").onclick = () => { ov.style.display = "none"; };
   $("s-test").onclick = async () => {
-    saveSetup();
-    const c = hubCfg();
-    if (!c.worker || !c.token) { status("❌ 请先填写 Worker 地址和访问令牌", S_WARN); return; }
-    status("正在测试连接…");
     try {
-      const me = await workerApi("users/self");
-      status("✅ 连接成功：" + (me.name || me.short_name || "已认证"));
+      await withHubTask(async () => {
+        const c = readSetup();
+        status("正在检查小助手和 Canvas 令牌…");
+        await checkWorker(c);
+        const me = await workerApi("users/self", {}, c);
+        if (!me || !me.id) throw new Error("Canvas 返回的用户信息不完整，本次配置未保存");
+        saveSetup(c);
+        status("✅ 连接成功，配置已保存：" + (me.name || me.short_name || "已认证"), S_OK);
+      });
     } catch (e) { status("❌ " + e.message, S_WARN); }
   };
   $("s-fetch").onclick = async () => {
-    saveSetup();
-    const c = hubCfg();
-    if (!c.worker || !c.token) { status("❌ 请先填写 Worker 地址和访问令牌", S_WARN); return; }
-    status("🚀 正在抓取全部课程（含提交状态、课件清单），请稍候…");
     try {
-      const data = await fetchAll();
-      status("✅ 完成：" + data.weeks[0].courses.length + " 门课程已生成看板");
-      boot(data);
-      showFirstTip();
-      setTimeout(() => { ov.style.display = "none"; }, 600);
+      await withHubTask(async () => {
+        const c = readSetup();
+        await checkWorker(c);
+        const data = await fetchAll(c, status);
+        status("✅ 完成：" + data.weeks[0].courses.length + " 门课程已生成看板", S_OK);
+        boot(data);
+        showFirstTip();
+        if (!data.weeks[0].warnings.length) ov.style.display = "none";
+        else status("⚠️ 看板已生成，部分内容未能读取：\n" + data.weeks[0].warnings.join("\n"), S_WARN);
+      });
     } catch (e) { status("❌ " + e.message, S_WARN); }
   };
   $("s-sub").onclick = async () => {
-    const c = saveSetup();
-    if (!c.worker || !c.token) { status("❌ 请先完成①②③并保存", S_WARN); return; }
-    status("正在启用订阅…");
     try {
-      const secret = c.secret || genSecret();
-      HUB_STORE.set("hubSecret", secret);
-      const r = await fetch(c.worker.replace(/\/+$/, "") + "/setup", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ secret: secret, token: c.token, sendkey: c.sendkey,
-                               host: hostOf(c.canvasUrl) }),
+      await withHubTask(async () => {
+        const c = readSetup();
+        status("正在检查订阅能力…");
+        const info = await checkWorker(c);
+        if (info.capabilities && info.capabilities.subscriptions === false)
+          throw new Error("未绑定 KV：请按图文教程绑定 HUB_KV 后再启用订阅；看板与日历下载不受影响");
+        const me = await workerApi("users/self", {}, c);
+        if (!me || !me.id) throw new Error("Canvas 返回的用户信息不完整，未启用订阅");
+        const secret = c.secret || genSecret();
+        // 先确认本地可保存密钥，以免云端成功后丢失访问订阅的凭证。
+        saveSetup(Object.assign({}, c, { secret }));
+        const { response: r, body } = await requestText(c.worker + "/setup", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ secret: secret, token: c.token, sendkey: c.sendkey,
+                                 host: hostOf(c.canvasUrl) }),
+        });
+        let j;
+        try { j = JSON.parse(body); } catch (e) { throw new Error("小助手订阅接口返回非 JSON 数据，请检查部署代码"); }
+        if (!r.ok || !j.ok) throw new Error(j.error || "HTTP " + r.status);
+        const link = new URL(j.icsUrl);
+        if (link.origin !== c.worker || link.pathname !== "/ics" || link.searchParams.get("secret") !== secret)
+          throw new Error("小助手返回的订阅链接不正确，请更新 Worker 代码");
+        $("s-subbox").style.display = "block";
+        $("s-icsurl").textContent = j.icsUrl;
+        setIcsLink(j.icsUrl);
+        status("✅ 已启用：把上面链接订阅到手机日历（截止前2小时提醒）；" +
+               (c.sendkey ? "SendKey 已保存，请确认 Worker Cron 已设置为每天 18:30" : "如需微信提醒，填写 Server酱 SendKey 后再点一次本按钮"));
       });
-      const j = await r.json();
-      if (!j.ok) throw new Error(j.error || "HTTP " + r.status);
-      $("s-subbox").style.display = "block";
-      $("s-icsurl").textContent = j.icsUrl;
-      setIcsLink(j.icsUrl);
-      status("✅ 已启用：把上面链接订阅到手机日历（截止前2小时提醒）；" +
-             (c.sendkey ? "微信每日提醒已就绪（Worker Cron 每天 18:30 推送）" : "如需微信提醒，填写 Server酱 SendKey 后再点一次本按钮"));
     } catch (e) { status("❌ " + e.message, S_WARN); }
   };
   // 小助手地址即时连通性检测（输完 0.7 秒自动检查，当场发现填错）
@@ -1114,29 +1262,41 @@ function showSetup() {
     wkSpan.style.cssText = "font-size:.78rem;margin-left:6px;white-space:nowrap";
     wkInp.parentElement.appendChild(wkSpan);
     let wkTimer = null;
+    let wkRevision = 0;
     const wkRun = async () => {
       const v = wkInp.value.trim();
+      const revision = wkRevision;
       const el = $("worker-check");
       if (!v) { el.textContent = ""; return; }
-      if (!/^https:\/\/.+\.workers\.dev\/?$/.test(v)) {
+      let origin;
+      try { origin = normalizeOrigin(v, "小助手地址"); } catch (e) {
         el.style.color = S_WARN;
-        el.textContent = "⚠️ 地址应以 https:// 开头、以 .workers.dev 结尾";
+        el.textContent = "⚠️ " + e.message;
         return;
       }
       el.style.color = ""; el.textContent = "⏳ 正在检查…";
       try {
-        const r = await fetch(v.replace(/\/+$/, "") + "/");
-        const j = await r.json().catch(() => null);
-        if (j && j.name && String(j.name).includes("canvas-weekly-hub")) {
+        const { response: r, body } = await requestText(origin + "/");
+        if (revision !== wkRevision) return;
+        let j = null;
+        try { j = JSON.parse(body); } catch (e) {}
+        if (r.ok && j && j.ok === true && j.name === "canvas-weekly-hub proxy") {
           el.style.color = S_OK; el.textContent = "✅ 小助手在线";
+          showCapabilities(j);
         } else {
           el.style.color = S_WARN; el.textContent = "⚠️ 能连上但不是本项目的代码：回 Cloudflare 确认已粘贴";
         }
       } catch (e) {
+        if (revision !== wkRevision) return;
         el.style.color = S_WARN; el.textContent = "❌ 连不上：检查地址拼写，或部署还没完成";
       }
     };
-    wkInp.addEventListener("input", () => { clearTimeout(wkTimer); wkTimer = setTimeout(wkRun, 700); });
+    wkInp.addEventListener("input", () => {
+      wkRevision += 1;
+      $("worker-check").textContent = "";
+      $("s-capabilities").textContent = "订阅需要 KV 存储；测试连接时会检查是否可用。";
+      clearTimeout(wkTimer); wkTimer = setTimeout(wkRun, 700);
+    });
     if (wkInp.value) wkRun();
   }
 
@@ -1162,25 +1322,37 @@ function showSetup() {
   };
   $("s-copy").onclick = () => {
     navigator.clipboard.writeText($("s-icsurl").textContent)
-      .then(() => status("✅ 已复制", S_OK));
+      .then(() => status("✅ 已复制", S_OK))
+      .catch(() => status("复制失败，请手动选中上面的订阅链接复制", S_WARN));
   };
   $("s-clear").onclick = () => {
     if (!confirm("确定清除本浏览器里的全部看板数据与令牌？（不会影响你的 Canvas 账号）")) return;
+    try {
     ["hubData", "hubLastState", "hubWorker", "hubCanvasUrl", "hubToken",
      "hubExpires", "hubSendKey", "hubSecret"].forEach((k) => HUB_STORE.del(k));
     status("已清除。刷新页面将回到初始状态。");
     setTimeout(() => location.reload(), 700);
+    } catch (e) { status("❌ 无法清除浏览器存储，请通过浏览器的本站数据设置处理", S_WARN); }
   };
 }
 
-function saveSetup() {
+function readSetup() {
   const g = (id) => (document.getElementById(id) ? document.getElementById(id).value.trim() : "");
-  const map = { hubWorker: g("s-worker"), hubCanvasUrl: g("s-canvas"),
-                hubToken: g("s-token"), hubExpires: g("s-exp"), hubSendKey: g("s-sendkey") };
-  for (const k of Object.keys(map)) HUB_STORE.set(k, map[k]);
-  let secret = HUB_STORE.get("hubSecret", "");
-  if (!secret) { secret = genSecret(); HUB_STORE.set("hubSecret", secret); }
-  return hubCfg();
+  return validateHubCfg({ worker: g("s-worker"), canvasUrl: g("s-canvas"), token: g("s-token"),
+    expires: g("s-exp"), sendkey: g("s-sendkey"), secret: hubCfg().secret });
+}
+
+function saveSetup(inputCfg) {
+  const c = validateHubCfg(inputCfg || readSetup());
+  storeTogether(configValues(c));
+  $("s-worker").value = c.worker;
+  $("s-canvas").value = c.canvasUrl;
+  return c;
+}
+
+function configValues(c) {
+  return { hubWorker: c.worker, hubCanvasUrl: c.canvasUrl, hubToken: c.token,
+    hubExpires: c.expires || "", hubSendKey: c.sendkey || "", hubSecret: c.secret || "" };
 }
 
 function setIcsLink(url) {
@@ -1225,9 +1397,11 @@ refreshBtn.onclick = async () => {
   refreshBtn.textContent = "⏳";
   refreshBtn.disabled = true;
   try {
-    const data = await fetchAll();
-    boot(data);
-    showFirstTip();
+    await withHubTask(async () => {
+      const data = await fetchAll();
+      boot(data);
+      showFirstTip();
+    });
   } catch (e) {
     showSetup();
     const st = document.getElementById("s-status");

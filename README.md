@@ -4,7 +4,7 @@
 
 **城大 Canvas 课程助手** —— 为**香港城市大学（CityU）学生**打造的全自动 Canvas 课程周报与学习看板，基于 [Canvas LMS](https://www.instructure.com/canvas) API，同样兼容其他使用 Canvas 的学校。
 
-定时抓取你在 Canvas 上的全部课程动态：新作业、未提交任务、老师改的截止时间、新上传的 PPT、新公告，汇总成周报与一个属于你的学习看板。**算法公开，数据私有**——你的课程信息只留在你自己的电脑上，本仓库不含任何人的凭证与数据。
+定时抓取你在 Canvas 上的全部课程动态：新作业、未提交任务、老师改的截止时间、新上传的 PPT、新公告，汇总成周报与一个属于你的学习看板。**算法公开，数据私有**——数据保存在你自己的设备；选择云端备份或订阅时会用到你自己的仓库或 Worker。本仓库不含任何人的凭证与数据。
 
 ## 🚀 两种用法，按需选择
 
@@ -31,6 +31,8 @@
 - 🌗 深色模式 · 🔍 跨周搜索 · 🗓 历史归档
 
 ❓ **卡住了？** 看页面里的「📖 手把手图文教程」——注册、部署、每个英文按钮都有对照说明。更完整的说明见 **[网页版使用指南](docs/网页版使用指南.md)**
+
+本地 v2.2.0 候选迭代：支持 Worker 的 HTTPS 自定义域名；连接成功才保存设置；提前检测 KV 能力；抓取时显示课程进度、超时与部分失败警告。旧版 Worker 仍能生成看板，完整能力检测需要更新自己的 `worker.js`。尚未发布到线上入口，见 [升级验收报告](docs/1002_配置体验升级验收_v1.md)。
 
 ### 🅰️ 如果有 AI agent，可以直接克隆仓库导入定时任务
 
@@ -126,12 +128,14 @@ docs/screenshots/            # 界面截图
 | `upcoming_days` | 统计"未来几天"要截止的作业 | 7 |
 | `tz_offset_hours` | 展示用时区偏移（小时） | 8（UTC+8） |
 | `download_files` | 是否自动下载新课件到本地 | true |
-| `download_dir` | 课件保存目录（相对工作目录） | downloads |
+| `download_dir` | 课件保存目录（相对脚本数据目录） | downloads |
 | `term_filter` | 只统计匹配该关键字的学期，留空 = 全部活跃课程 | 空 |
 | `github.username` | 你的 GitHub 用户名 | — |
 | `github.repo_name` | 你的看板数据仓库名 | learning-hub |
-| `github.repo_dir` | 本机网站仓库的绝对路径 | — |
-| `github.push_enabled` | 是否自动 commit + push 网站数据 | true |
+| `github.repo_dir` | 本机网站仓库路径，相对路径以脚本数据目录为基准 | 空（仅本地时不用填） |
+| `github.push_enabled` | 是否自动 commit + push 网站数据；启用前须自行确认仓库与公开范围 | false |
+
+本地版先复制示例并填写令牌，再运行 `python canvas_weekly_report.py --check-config` 检查格式；该命令不访问 Canvas、不下载、不推送。检查通过后运行 `python canvas_weekly_report.py`，可双击生成的离线看板，或运行 `python serve_board.py` 打开 `http://localhost:8137/`。本地服务直接读取引擎的 `data.json`，无需先建网站仓库。已有用户配置不会自动改写。
 
 ## 🔐 安全与隐私（重要）
 
@@ -147,6 +151,7 @@ docs/screenshots/            # 界面截图
 - **本仓库不包含任何人的 Canvas 凭证。** `canvas_config.json` 需由使用者自己创建并填入自己的 Token（从 `config/canvas_config.example.json` 复制）。
 - Token 只保存在使用者本机，等同于账号凭证——不要提交、不要分享。若怀疑泄露，到 Canvas「账户 → 设置」删除该令牌即立即失效。
 - 课程数据仓库里只有页面代码与课程任务摘要（作业名/截止时间/文件名），不含 Token，也不含作业正文。
+- 网页版普通抓取时，令牌保存在浏览器并经你自己的 Worker 转发；启用日历订阅 / 微信提醒后，令牌与 SendKey 会保存到你自己的 Worker KV。订阅链接含访问密钥，不应公开分享。
 - 不小心把 Token 提交进了某个仓库？立即吊销旧 Token，必要时删除该仓库重建。
 
 ## ❓ 常见问题

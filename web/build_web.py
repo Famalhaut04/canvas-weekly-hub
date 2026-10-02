@@ -28,9 +28,12 @@ OVERLAY_CSS = """
     z-index: 50; display: flex; align-items: flex-start; justify-content: center;
     padding: 40px 14px; overflow: auto; }
   #setup-overlay .modal { background: var(--panel); color: var(--ink); border: 1px solid var(--line);
-    border-radius: 16px; width: 100%; max-width: 760px; padding: 20px 22px;
+    border-radius: 16px; width: 100%; min-width: 0; max-width: 760px; padding: 20px 22px;
+    overflow-wrap: anywhere;
     box-shadow: 0 18px 50px rgba(0,0,0,.35); }
-  #setup-overlay h3 { font-size: 1.1rem; margin-bottom: 4px; }
+  #setup-overlay h3 { font-size: 1.1rem; margin-bottom: 4px; min-width: 0; }
+  #setup-overlay .setup-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  #setup-overlay .setup-head .btn { flex-shrink: 0; }
   #setup-overlay .frow { display: flex; gap: 8px; align-items: center; margin: 9px 0; flex-wrap: wrap; }
   #setup-overlay .frow label { width: 128px; font-size: .9rem; color: var(--muted); }
   #setup-overlay input { flex: 1; min-width: 200px; padding: 7px 10px; border: 1px solid var(--line);
@@ -41,6 +44,7 @@ OVERLAY_CSS = """
     background: var(--panel-2); color: var(--ink); cursor: pointer; font: inherit; }
   #setup-overlay .btn.primary { background: var(--brand); color: #fff; border-color: var(--brand); font-weight: 600; }
   #setup-overlay .btn:hover { filter: brightness(1.08); }
+  #setup-overlay .btn:disabled { opacity: .65; cursor: wait; }
   #setup-overlay .status { font-size: .85rem; margin-top: 8px; white-space: pre-wrap; min-height: 1.2em; }
   #setup-overlay a { color: var(--brand-2); }
   .subbox { background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px;

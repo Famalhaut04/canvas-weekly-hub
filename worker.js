@@ -73,8 +73,10 @@ async function canvasAll(host, token, path, params = {}) {
     if (r.status === 401) throw new Error("令牌无效或已过期（HTTP 401）");
     if (!r.ok) throw new Error(`Canvas API HTTP ${r.status} @ ${path}`);
     const arr = await r.json();
-    out = out.concat(Array.isArray(arr) ? arr : [arr]);
-    if (!Array.isArray(arr) || arr.length < 100 || page >= 20) break;
+    if (!Array.isArray(arr)) throw new Error(`Canvas 列表格式异常 @ ${path}`);
+    out = out.concat(arr);
+    if (arr.length < 100) break;
+    if (page >= 20) throw new Error(`Canvas 分页达到上限 @ ${path}`);
     page += 1;
   }
   return out;
@@ -88,7 +90,7 @@ async function collectData(host, token) {
   for (const c of courses) {
     const [assignments, files, announcements] = await Promise.all([
       canvasAll(host, token, `courses/${c.id}/assignments`,
-                { order_by: "due_at", "include[]": "submission" }).catch(() => []),
+                { order_by: "due_at", "include[]": "submission" }),
       canvasAll(host, token, `courses/${c.id}/files`,
                 { sort: "created_at", order: "desc" }).catch(() => []),
       canvasAll(host, token, `courses/${c.id}/announcements`, {}).catch(() => []),
@@ -279,6 +281,8 @@ export default {
       }
       if (url.pathname === "/") {
         return json({ name: "canvas-weekly-hub proxy", ok: true,
+                      version: "2.2.0",
+                      capabilities: { proxy: true, subscriptions: !!env.HUB_KV },
                       endpoints: ["/proxy/*", "/setup", "/ics"] });
       }
       return json({ error: "未知路径" }, 404);

@@ -20,6 +20,7 @@
 仅依赖 Python 标准库。token 未配置时生成提示报告并正常退出（退出码 2）。
 """
 
+import argparse
 import hashlib
 import json
 import os
@@ -78,17 +79,92 @@ MAX_PAGES = 20
 
 # ---------------------------------------------------------------- 基础工具
 
+def validate_config(cfg):
+    """校验本地配置，不访问网络、不修改用户配置或输出凭证。"""
+    if not isinstance(cfg, dict):
+        raise ValueError("配置最外层必须是 JSON 对象")
+    cfg = dict(cfg)
+    url = cfg.get("canvas_url")
+    if not isinstance(url, str):
+        raise ValueError("canvas_url 必须填写学校的 HTTPS 站点地址")
+    try:
+        url = url.strip()
+        if any(c.isspace() for c in url):
+            raise ValueError("invalid whitespace")
+        parsed = urllib.parse.urlsplit(url)
+        # 访问 port 属性会检查非法端口，不把原始地址写进错误信息。
+        if parsed.port is not None and not 1 <= parsed.port <= 65535:
+            raise ValueError("invalid port")
+        if (parsed.scheme != "https" or not parsed.hostname or parsed.username or
+                parsed.password or parsed.path not in ("", "/") or parsed.query or
+                parsed.fragment or any(c.isspace() for c in parsed.netloc)):
+            raise ValueError("invalid origin")
+    except ValueError:
+        raise ValueError("canvas_url 只填 HTTPS 站点地址，不要附带页面路径、账号或查询参数")
+    cfg["canvas_url"] = "https://" + parsed.netloc
+    for key in ("access_token", "token_expires_at", "term_filter", "download_dir"):
+        value = cfg.get(key, "")
+        if not isinstance(value, str):
+            raise ValueError("%s 必须是字符串" % key)
+        cfg[key] = value.strip()
+    if any(c.isspace() for c in cfg["access_token"]):
+        raise ValueError("access_token 不应包含空格或换行")
+    expires = cfg["token_expires_at"]
+    if expires:
+        try:
+            if datetime.strptime(expires, "%Y-%m-%d").strftime("%Y-%m-%d") != expires:
+                raise ValueError("invalid date")
+        except ValueError:
+            raise ValueError("token_expires_at 必须是有效日期，格式为 YYYY-MM-DD")
+    for key, default, minimum, maximum in (("lookback_days", 7, 1, 365),
+                                          ("upcoming_days", 7, 1, 365),
+                                          ("token_remind_days", 5, 0, 365)):
+        value = cfg.get(key, default)
+        if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= maximum:
+            raise ValueError("%s 必须是 %d 到 %d 的整数" % (key, minimum, maximum))
+        cfg[key] = value
+    tz = cfg.get("tz_offset_hours", 8)
+    if isinstance(tz, bool) or not isinstance(tz, (int, float)) or not -12 <= tz <= 14:
+        raise ValueError("tz_offset_hours 必须是 -12 到 14 的数字")
+    cfg["tz_offset_hours"] = tz
+    if not isinstance(cfg.get("download_files", True), bool):
+        raise ValueError("download_files 必须为 true 或 false")
+    gh = cfg.get("github")
+    if gh is None:
+        gh = {}
+    if not isinstance(gh, dict):
+        raise ValueError("github 必须是 JSON 对象")
+    gh = dict(gh)
+    for key in ("username", "repo_name", "repo_dir"):
+        value = gh.get(key, "")
+        if not isinstance(value, str):
+            raise ValueError("github.%s 必须是字符串" % key)
+        gh[key] = value.strip()
+    if not isinstance(gh.get("push_enabled", False), bool):
+        raise ValueError("github.push_enabled 必须为 true 或 false")
+    if gh.get("repo_dir"):
+        path = Path(gh["repo_dir"])
+        if not path.is_absolute():
+            path = BASE_DIR / path
+        gh["repo_dir"] = str(path.resolve())
+    if gh.get("push_enabled", False):
+        if not gh.get("repo_dir") or not (Path(gh["repo_dir"]) / ".git").exists():
+            raise ValueError("启用云端备份前，github.repo_dir 必须指向已有 Git 仓库；只在本地使用请设 push_enabled 为 false")
+    cfg["github"] = gh
+    return cfg
+
+
 def load_config():
     try:
-        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
+        with open(CONFIG_PATH, "r", encoding="utf-8-sig") as f:
+            return validate_config(json.load(f))
     except FileNotFoundError:
         print("CONFIG_MISSING: 未找到 canvas_config.json。"
               "请先复制 config/canvas_config.example.json 为 canvas_config.json，"
               "并填入你自己的 Canvas Token（步骤见 docs/部署指南.md）。")
         sys.exit(2)
-    except json.JSONDecodeError as e:
-        print(f"CONFIG_INVALID: canvas_config.json 不是合法的 JSON：{e}")
+    except (ValueError, OSError) as e:
+        print(f"CONFIG_INVALID: {e}")
         sys.exit(2)
 
 
@@ -128,11 +204,18 @@ def api_get_all(base_url, token, path, params=None):
             raise RuntimeError(f"Canvas API {path} 返回 HTTP {e.code}：{detail}") from e
         except urllib.error.URLError as e:
             raise RuntimeError(f"无法连接 Canvas（{e.reason}）。请检查网络/校园网。") from e
+        except (ValueError, TimeoutError) as e:
+            raise RuntimeError("Canvas API %s 响应无效或请求超时，请稍后重试" % path) from e
         if not isinstance(batch, list):
-            batch = [batch]
+            # 下载前取文件元数据的单对象接口，其余调用都应返回列表。
+            if isinstance(batch, dict) and re.fullmatch(r"/courses/\d+/files/\d+", path):
+                return [batch]
+            raise RuntimeError("Canvas API %s 列表格式异常，本次抓取中止" % path)
         items.extend(batch)
         if len(batch) < int(params["per_page"]):
             break
+        if page == MAX_PAGES:
+            raise RuntimeError("Canvas API %s 达到分页上限，本次抓取中止，避免保存不完整快照" % path)
         page += 1
     return items
 
@@ -293,6 +376,7 @@ def fetch_week_data(cfg):
                    if term_filter.lower() in (c.get("term") or {}).get("name", "").lower()]
 
     week_courses = []
+    warnings = []
     for c in courses:
         cid = c["id"]
         name = c.get("name") or f"课程{cid}"
@@ -300,11 +384,9 @@ def fetch_week_data(cfg):
         term = (c.get("term") or {}).get("name", "")
 
         # ---- 作业 ----
-        try:
-            assignments = api_get_all(base, token, f"/courses/{cid}/assignments",
-                                      {"order_by": "due_at", "include[]": ["submission"]})
-        except RuntimeError:
-            assignments = []
+        # 作业是快照对比的依据，读取失败时中止，不能当成全部被删除。
+        assignments = api_get_all(base, token, f"/courses/{cid}/assignments",
+                                  {"order_by": "due_at", "include[]": ["submission"]})
         new_assignments, upcoming, changes = [], [], []
         course_state = {}
         prev_course = prev_state.get("assignments", {}).get(str(cid), {})
@@ -362,7 +444,8 @@ def fetch_week_data(cfg):
         try:
             files = api_get_all(base, token, f"/courses/{cid}/files",
                                 {"sort": "created_at", "order": "desc"})
-        except RuntimeError:
+        except RuntimeError as e:
+            warnings.append("%s：课件未能读取（%s）" % (name, e))
             files = []
         new_files = []
         files_page = f"{base}/courses/{cid}/files"
@@ -405,7 +488,8 @@ def fetch_week_data(cfg):
         # ---- 公告 ----
         try:
             anns = api_get_all(base, token, f"/courses/{cid}/announcements", {})
-        except RuntimeError:
+        except RuntimeError as e:
+            warnings.append("%s：公告未能读取（%s）" % (name, e))
             anns = []
         new_anns = []
         for an in anns:
@@ -435,6 +519,7 @@ def fetch_week_data(cfg):
         "generated_at": now.astimezone(HK_TZ).strftime("%Y-%m-%d %H:%M"),
         "range": f"{lookback_start.astimezone(HK_TZ).strftime('%Y-%m-%d %H:%M')} ~ {now.astimezone(HK_TZ).strftime('%Y-%m-%d %H:%M')}",
         "courses": week_courses,
+        "warnings": warnings,
     }
     return week, new_state, stats
 
@@ -479,6 +564,8 @@ def render_markdown(week, token_warn=None, stats=None):
         f"- 新公告：{n_anns} 条；与上次相比变化：{n_changes} 处",
         "",
     ]
+    for warning in week.get("warnings", []):
+        lines += ["> ⚠️ " + warning, ""]
     def is_active(c):
         return bool(c["new_assignments"] or c["upcoming"] or c["new_files"] or c["announcements"])
 
@@ -657,7 +744,7 @@ def test_connection(cfg):
 
 def run_once(cfg=None, quiet=False):
     """执行一次完整抓取流程，返回状态字典（不退出进程，供命令行与图形界面共用）。"""
-    cfg = cfg or load_config()
+    cfg = validate_config(cfg) if cfg is not None else load_config()
     result = {"ok": False, "error": None, "week": None,
               "stats": {"downloaded": 0, "skipped": 0, "failed": 0, "total": 0},
               "report": None, "ics": None, "ics_count": 0, "standalone": None,
@@ -697,8 +784,18 @@ def run_once(cfg=None, quiet=False):
 
 def main():
     global HK_TZ
+    parser = argparse.ArgumentParser(description="Canvas 周报与学习看板（默认仅在本地保存）")
+    parser.add_argument("--check-config", action="store_true", help="仅检查配置，不抓取、不下载、不推送")
+    args = parser.parse_args()
     cfg = load_config()
     HK_TZ = timezone(timedelta(hours=float(cfg.get("tz_offset_hours", 8))))
+    if args.check_config:
+        if not cfg["access_token"]:
+            print("CONFIG_INVALID: access_token 为空，请填写自己的 Canvas 访问令牌")
+            sys.exit(2)
+        print("CONFIG_OK: 配置格式通过；尚未验证 Canvas 连通性")
+        print("云端备份：" + ("启用（运行抓取时会 commit + push）" if cfg["github"].get("push_enabled", False) else "关闭（仅本地）"))
+        return
     if not cfg.get("access_token", "").strip():
         msg = ("canvas_config.json 中的 access_token 为空。"
                "请按项目文档（docs/部署指南.md）的步骤，从 Canvas"
@@ -729,11 +826,13 @@ def main():
           f"下载={stats['downloaded']}(跳过{stats['skipped']},失败{stats['failed']})/{stats['total']} 日历事件={res['ics_count']}")
     if res["token_warn"]:
         print(f"TOKEN_WARNING: {res['token_warn']}")
+    for warning in week.get("warnings", []):
+        print("FETCH_WARNING: " + warning)
     print(f"报告文件：{res['report']}")
     print(f"日历文件：{res['ics']}（可导入手机日历）")
     if res["standalone"]:
         print(f"单机看板：{res['standalone']}（双击即可打开，无需服务器）")
-    print(f"看板状态：{res['site_status']}；本地看板：双击 启动学习看板.bat")
+    print(f"看板状态：{res['site_status']}；本地看板：运行 python serve_board.py")
     gh = cfg.get("github") or {}
     if gh.get("username") and gh.get("repo_name"):
         print(f"云端备份仓库：https://github.com/{gh['username']}/{gh['repo_name']}（私有）")
