@@ -1,0 +1,25 @@
+{
+  "text": "登录学校 Canvas，到“账户 → 设置”获取访问令牌。",
+  "removed_requested_prefix": true,
+  "public_url": "https://famalhaut04.github.io/canvas-weekly-hub/web/",
+  "checked_utc": "2026-10-02T10:47:10.1153412Z",
+  "public_matches_source": true,
+  "pages_commit": "e06ea39a4cff278f51e42c822a5d6d4c919aec8f",
+  "pages_status": "built",
+  "source_commit": "a22463943bb6c17abb516960fb132882a31d367e",
+  "assets": [
+    {
+      "name": "canvas-weekly-hub-v2.2-source.zip",
+      "matches_local": true,
+      "bytes": 2235399,
+      "sha256_raw": "b9b0bbb7e9d3f20dc802e157e38888e6f0b6ec8701a09248fe123aae43e45680"
+    },
+    {
+      "name": "worker.js",
+      "matches_local": true,
+      "bytes": 131094,
+      "sha256_raw": "803eaeb0dc05b87c6a312e75de534808f749dab13b52ac1cb3814d7ff54b2559"
+    }
+  ],
+  "public_http": 200
+}
