@@ -22,8 +22,7 @@
 ## 基础版：部署一次，填令牌即用
 
 **[打开项目入口](https://famalhaut04.github.io/canvas-weekly-hub/web/)**
-
-先确认学校允许个人 API 使用。本项目使用手动令牌，不代表校方批准的应用；[Canvas 官方要求面向其他用户的应用使用 OAuth](https://developerdocs.instructure.com/services/canvas/oauth2/file.oauth)，个人自部署适用范围需向学校确认。
+本项目使用手动令牌。
 
 1. 创建自己的助手：一键部署，或用邮箱登录 Cloudflare 后复制部署代码。
 2. 从 Worker 概览 / Domains & Routes 打开自己的正式网址，看到“连接你的 Canvas”；不用编辑器预览网址。
