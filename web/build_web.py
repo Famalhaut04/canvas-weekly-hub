@@ -43,6 +43,18 @@ OVERLAY_CSS = """
   #setup-overlay .frow label { width: 128px; font-size: .9rem; color: var(--muted); }
   #setup-overlay input { flex: 1; min-width: 200px; padding: 7px 10px; border: 1px solid var(--line);
     border-radius: 8px; background: var(--panel-2); color: var(--ink); font: inherit; }
+  #setup-overlay input[type="checkbox"] { min-width: 0; width: auto; margin-right: 6px; }
+  #refresh-status { margin-bottom: 14px; font-size: .85rem; overflow-wrap: anywhere; }
+  #refresh-plan { color: var(--muted); }
+  #refresh-message { color: var(--brand); }
+  #refresh-reminder { margin-top: 8px; padding: 12px 14px; border: 1px solid var(--line);
+    border-left: 4px solid var(--accent); background: var(--panel); border-radius: 12px; }
+  #refresh-reminder[hidden] { display: none; }
+  #refresh-reminder .reminder-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+  #refresh-reminder button { padding: 7px 14px; border: 1px solid var(--line);
+    border-radius: 8px; background: var(--panel-2); color: var(--ink); }
+  #refresh-reminder #reminder-refresh { background: var(--brand); color: #fff; }
+  #refresh-reminder button:disabled { opacity: .65; cursor: wait; }
   #setup-overlay .hint { font-size: .8rem; color: var(--muted); margin: 4px 0 0; }
   #setup-overlay .bar { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
   #setup-overlay .btn { padding: 7px 14px; border-radius: 8px; border: 1px solid var(--line);
@@ -71,6 +83,7 @@ OVERLAY_CSS = """
     border-radius: 12px; padding: 10px 14px; margin: 0 0 14px; font-size: .85rem; color: var(--ink); }
   #first-tip button { background: none; border: 0; cursor: pointer; color: var(--muted);
     font-size: 1rem; padding: 0 2px; }
+  #first-tip > span { flex: 1; min-width: 0; }
   #first-tip button:hover { color: var(--ink); }
   @media (max-width: 640px) {
     #setup-overlay { padding: 12px 8px; }
@@ -98,6 +111,19 @@ html = replace_once(
     '    <button id="theme" class="icon-btn" title="切换深色 / 浅色">🌙</button>')
 
 # 3) 启动逻辑改为：localStorage → 设置向导（原 data.json 回退保留给服务器部署形态）
+html = replace_once(html, "<main>", '''<main>
+  <section id="refresh-status" aria-label="课程更新">
+    <div id="refresh-time">更新时间未知，可手动刷新</div>
+    <div id="refresh-plan">每 3 天提醒 · 点击才刷新</div>
+    <div id="refresh-message" role="status" aria-live="polite"></div>
+    <div id="refresh-reminder" hidden>
+      <p id="reminder-text" role="status" aria-live="polite"></p>
+      <div class="reminder-actions">
+        <button id="reminder-refresh">刷新课程</button>
+        <button id="reminder-later">暂不刷新</button>
+      </div>
+    </div>
+  </section>''')
 OLD_START = '''/* 网页版：数据来自 localStorage（由 overrides.js 的 fetchAll 写入），否则弹设置向导 */
 window.__HUB_BOOT__ = function () {'''
 NEW_START = '''/* 网页版：数据来自 localStorage（由 overrides.js 的 fetchAll 写入），否则弹设置向导 */

@@ -45,6 +45,8 @@
   .icon-btn { background: rgba(255,255,255,.16); border: 1px solid rgba(255,255,255,.25);
               color: #fff; border-radius: 999px; width: 34px; height: 34px; line-height: 1; }
   .icon-btn:hover { background: rgba(255,255,255,.28); }
+  .icon-btn.refresh-action { width: auto; padding: 0 12px; flex-shrink: 0; font-size: .85rem; }
+  button:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
   .meta { max-width: 1060px; margin: 0 auto; padding: 0 18px 12px; font-size: .8rem;
           color: rgba(255,255,255,.85); display: flex; gap: 10px; flex-wrap: wrap; }
   .meta i { font-style: normal; opacity: .55; }
@@ -166,7 +168,7 @@
     </label>
     <a id="canvas-link" class="icon-btn" href="https://canvas.cityu.edu.hk/" title="登录 / 打开 Canvas" target="_blank" rel="noopener noreferrer"
        style="display:grid;place-items:center;text-decoration:none">🎓</a>
-    <button id="engine-refresh-btn" class="icon-btn" title="按本地配置抓取最新数据" style="display:none">🔄</button>
+    <button id="engine-refresh-btn" class="icon-btn refresh-action" title="按本地配置抓取最新数据" style="display:none">刷新课程</button>
     <button id="theme" class="icon-btn" title="切换深色 / 浅色">🌙</button>
   </div>
   <div class="meta">
@@ -572,7 +574,7 @@ if (window.__HUB_DATA__) {
     if (j && j.probe) b.style.display = "";
   }).catch(() => {});
   b.onclick = async () => {
-    b.disabled = true; const old = b.textContent; b.textContent = "⏳";
+    b.disabled = true; const old = b.textContent; b.textContent = "刷新中…";
     try {
       const r = await fetch("/refresh", { method: "POST" });
       const j = await r.json();

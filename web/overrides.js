@@ -76,7 +76,7 @@ let hubBusy = false;
 async function withHubTask(action) {
   if (hubBusy) throw new Error("已有操作正在进行，请等待完成后再试");
   hubBusy = true;
-  const ids = ["s-test", "s-fetch", "s-unsub", "s-close", "s-close2", "s-clear", "refresh-btn", "s-import", "s-backup"];
+  const ids = ["s-test", "s-fetch", "s-unsub", "s-close", "s-close2", "s-clear", "refresh-btn", "reminder-refresh", "s-import", "s-backup"];
   ids.push("s-worker", "s-canvas", "s-token", "s-exp", "s-web-entry", "s-agent-entry");
   const buttons = ids.map((id) => document.getElementById(id)).filter(Boolean);
   const disabled = buttons.map((b) => b.disabled);
@@ -97,6 +97,116 @@ function hubCfg() {
     sendkey: (HUB_STORE.get("hubSendKey") || "").trim(),
     secret: (HUB_STORE.get("hubSecret") || "").trim(),
   };
+}
+
+/* 更新提醒只检查本地时间；所有 Canvas 操作由用户触发。 */
+const REMINDER_DAY = 86400000;
+let reminderTimer = null;
+let reminderDismissed = "";
+let reminderRevision = 0;
+
+function reminderPrefs() {
+  try {
+    const p = JSON.parse(HUB_STORE.get("hubUpdateReminder") || "null");
+    if (p && typeof p.enabled === "boolean" && Number.isSafeInteger(p.days) && p.days >= 1)
+      return p;
+  } catch (e) { /* 损坏的设置使用默认值 */ }
+  return { enabled: true, days: 3 };
+}
+
+async function refreshBinding(c) {
+  // 绑定学校、个人实例与令牌，不在状态里重复保存明文令牌，也不发送绑定值。
+  const bytes = new TextEncoder().encode(JSON.stringify([c.worker, c.canvasUrl, c.token]));
+  const hash = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(hash), (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function legacyRefreshTime(data) {
+  if (!data) return null;
+  const date = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})$/.exec(data.updated_at || "");
+  const zone = /^UTC([+-]\d+(?:\.\d+)?)$/.exec(data.tz_label || "");
+  if (!date || !zone || Math.abs(Number(zone[1])) > 14) return null;
+  const wall = Date.UTC(+date[1], +date[2] - 1, +date[3], +date[4], +date[5]);
+  const d = new Date(wall);
+  if (d.getUTCFullYear() !== +date[1] || d.getUTCMonth() !== +date[2] - 1 ||
+      d.getUTCDate() !== +date[3] || d.getUTCHours() !== +date[4] || d.getUTCMinutes() !== +date[5]) return null;
+  return wall - Number(zone[1]) * 3600000;
+}
+
+async function currentRefreshState() {
+  const c = hubCfg(), binding = await refreshBinding(c);
+  let state;
+  const raw = HUB_STORE.get("hubRefreshState");
+  try { state = JSON.parse(raw || "null"); } catch (e) {}
+  if (raw !== null && raw !== undefined) {
+    if (state && state.binding === binding && state.version === 1 &&
+        (state.successAt === null || (Number.isFinite(state.successAt) && state.successAt > 0))) return state;
+    // 有状态但身份不匹配或字段损坏时，不用旧历史推断另一个身份的更新时间。
+    return { version: 1, binding, successAt: null };
+  }
+  let data;
+  try { data = JSON.parse(HUB_STORE.get("hubData") || "null"); } catch (e) {}
+  const successAt = c.token && data && data.canvas_url === c.canvasUrl ? legacyRefreshTime(data) : null;
+  return { version: 1, binding, successAt };
+}
+
+function refreshNotice(msg) {
+  const el = document.getElementById("refresh-message");
+  if (el) el.textContent = msg;
+}
+
+async function updateRefreshReminder() {
+  clearTimeout(reminderTimer);
+  const revision = ++reminderRevision;
+  const time = document.getElementById("refresh-time");
+  if (!time) return;
+  try {
+    const state = await currentRefreshState();
+    if (revision !== reminderRevision) return;
+    const p = reminderPrefs();
+    const age = state.successAt === null ? null : Date.now() - state.successAt;
+    time.textContent = state.successAt === null ? "更新时间未知，可手动刷新" :
+      "上次成功更新：" + new Date(state.successAt).toLocaleString("zh-CN", { hour12: false }) + "（设备时区）";
+    const label = document.getElementById("refresh-plan");
+    if (label) label.textContent = p.enabled ? "每 " + p.days + " 天提醒 · 点击才刷新" : "更新提醒已关闭 · 可随时手动刷新";
+    const signature = JSON.stringify([state.binding, state.successAt, p.days]);
+    const banner = document.getElementById("refresh-reminder");
+    if (banner) {
+      banner.hidden = !p.enabled || age === null || age < p.days * REMINDER_DAY || reminderDismissed === signature;
+      document.getElementById("reminder-text").textContent = "课程数据已满 " + p.days + " 天未更新，是否现在刷新？";
+      document.getElementById("reminder-later").onclick = () => {
+        reminderDismissed = signature;
+        updateRefreshReminder();
+      };
+    }
+    if (!document.hidden && p.enabled && age !== null && reminderDismissed !== signature) {
+      // 前台最多每分钟校对；后台不承诺准点触发，恢复可见后重新比较时间戳。
+      const remaining = p.days * REMINDER_DAY - age;
+      reminderTimer = setTimeout(updateRefreshReminder, Math.max(1000, Math.min(60000, remaining > 0 ? remaining : 60000)));
+    }
+  } catch (e) {
+    time.textContent = "更新时间未知，可手动刷新";
+    refreshNotice("无法检查本地更新记录：请允许本站存储并使用支持 HTTPS 的现代浏览器。");
+  }
+}
+
+function loadReminderForm() {
+  const p = reminderPrefs();
+  $("s-reminder-enabled").checked = p.enabled;
+  $("s-reminder-days").value = String(p.days);
+  $("s-reminder-status").textContent = "";
+}
+
+// 同源标签页共享浏览器锁，不排队补抓，也不广播凭证或课程内容。
+async function withCanvasTask(action) {
+  return withHubTask(async () => {
+    if (!navigator.locks || typeof navigator.locks.request !== "function")
+      throw new Error("当前浏览器不支持多标签页刷新保护，请用新版 Edge、Chrome、Firefox 或 Safari 打开个人 HTTPS 网址后重试；旧看板仍可查看");
+    return navigator.locks.request("canvas-hub-user-query", { ifAvailable: true }, async (lock) => {
+      if (!lock) throw new Error("另一个标签页正在查询 Canvas，请等待它完成；本页不会排队重复刷新");
+      return action();
+    });
+  });
 }
 
 function hostOf(url) {
@@ -132,9 +242,12 @@ function workerApi(path, params, cfg) {
       if (/cloudflare|just a moment|attention required|access denied|blocked|rate limit/i.test(body))
         throw new Error("Canvas 拒绝访问（HTTP 403）：请求被学校/CDN 的防护拦截（疑似屏蔽云服务器访问）。" +
           "请稍后重试；若反复出现，请把本条提示和你的小助手地址反馈给作者");
-      throw new Error("Canvas 拒绝访问（HTTP 403）：" + (jsonMsg || clean.slice(0, 140) ||
-        "请确认令牌属于你自己；若反复出现请反馈此提示"));
+      throw new Error("Canvas 拒绝访问（HTTP 403）：请检查账号的课程 / 接口权限及学校访问限制；" +
+        "这不等同于令牌过期。" + (jsonMsg ? "详情：" + jsonMsg : ""));
     }
+    if (r.status >= 500) throw new Error("查询服务返回 HTTP " + r.status +
+      "：请检查个人助手部署、学校接口和网络；此状态不能判断令牌是否过期。" +
+      (jsonMsg ? "详情：" + jsonMsg : "") + " @ " + path);
     if (!r.ok) throw new Error("Canvas API HTTP " + r.status + (jsonMsg ? "：" + jsonMsg :
       clean ? "：" + clean.slice(0, 140) : "") + " @ " + path);
     try { return JSON.parse(body); }
@@ -183,6 +296,8 @@ function fileKind(name) {
 
 async function fetchAll(inputCfg, progress) {
   const cfg = validateHubCfg(inputCfg || hubCfg());
+  const binding = await refreshBinding(cfg);
+  const beforeBinding = await refreshBinding(hubCfg());
   const report = progress || (() => {});
   report("正在读取课程列表…");
   const courses = await apiAll("courses", { enrollment_state: "active", "include[]": "term" }, cfg);
@@ -303,9 +418,16 @@ async function fetchAll(inputCfg, progress) {
     site_title: "我的学习中心", canvas_url: cfg.canvasUrl, username: "",
     tz_label: tzLabel(), updated_at: week.generated_at, weeks: weeks.slice(0, 52),
   };
+  if (await refreshBinding(hubCfg()) !== beforeBinding)
+    throw new Error("查询期间配置已在其他页面更改，本次结果未保存，请按当前配置重新刷新");
+  const successAt = Date.now();
+  payload.updated_at = fmtLocal(new Date(successAt));
   storeTogether(Object.assign({}, inputCfg ? configValues(cfg) : {}, {
     hubData: JSON.stringify(payload), hubLastState: JSON.stringify(newState),
+    hubRefreshState: JSON.stringify({ version: 1, binding, successAt }),
   }));
+  reminderDismissed = "";
+  updateRefreshReminder();
   return payload;
 }
 
@@ -427,6 +549,7 @@ function showSetup() {
     $("worker-check").textContent = "";
     $("s-capabilities").textContent = "v2.2 暂停云端订阅与微信提醒；日历仍可下载后导入。";
     $("s-unsub").hidden = !saved.secret;
+    loadReminderForm();
     ov.style.display = "flex";
     if (!HUB_MANAGED_ORIGIN) $("s-worker").dispatchEvent(new Event("input"));
     $("s-canvas").dispatchEvent(new Event("input"));
@@ -508,6 +631,16 @@ python serve_board.py</pre>
     ${HUB_MANAGED_ORIGIN ? "</section>" : "</details>"}
     <div class="status" id="s-status" role="status" aria-live="polite"></div>
 
+    <section class="fstep" aria-labelledby="s-reminder-title">
+      <div class="fstep-h" id="s-reminder-title">更新提醒</div>
+      <p><label><input id="s-reminder-enabled" type="checkbox"> 开启更新提醒</label></p>
+      <div class="frow"><label for="s-reminder-days">提醒间隔（天）</label>
+        <input id="s-reminder-days" type="number" min="1" step="1" inputmode="numeric"></div>
+      <p class="hint">默认 3 天。到期只显示提示，不自动查询 Canvas；关闭页面后不会提醒，下次打开再检查。设置仅保存在当前浏览器。</p>
+      <button class="btn" id="s-reminder-save">保存提醒设置</button>
+      <div id="s-reminder-status" class="status" role="status" aria-live="polite"></div>
+    </section>
+
     <p class="hint" id="s-capabilities">v2.2 暂停云端订阅与微信提醒；日历仍可下载后导入。</p>
     <button class="btn" id="s-unsub" ${cfg.secret ? "" : "hidden"}>停用旧版云端订阅</button>
     <details class="faq"><summary>离线查看 / 旧版数据迁移</summary>
@@ -522,6 +655,20 @@ python serve_board.py</pre>
     </div>
   </div>`;
   document.body.appendChild(ov);
+
+  loadReminderForm();
+  $("s-reminder-save").onclick = () => {
+    try {
+      const raw = $("s-reminder-days").value.trim();
+      const days = Number(raw);
+      if (!/^\d+$/.test(raw) || !Number.isSafeInteger(days) || days < 1)
+        throw new Error("提醒天数应是至少 1 天的正整数");
+      const p = { enabled: $("s-reminder-enabled").checked, days };
+      HUB_STORE.set("hubUpdateReminder", JSON.stringify(p));
+      $("s-reminder-status").textContent = p.enabled ? "已保存：每 " + days + " 天提醒，点击才刷新。" : "已关闭提醒，仍可随时点击“刷新课程”。";
+      updateRefreshReminder();
+    } catch (e) { $("s-reminder-status").textContent = "未保存：" + e.message; }
+  };
 
   $("s-agent-prompt").value = AGENT_SETUP_PROMPT;
   const chooseRoute = (agent) => {
@@ -588,20 +735,20 @@ python serve_board.py</pre>
   $("s-close2").onclick = () => { ov.style.display = "none"; };
   $("s-test").onclick = async () => {
     try {
-      await withHubTask(async () => {
+      await withCanvasTask(async () => {
         const c = readSetup();
         status("正在检查小助手和 Canvas 令牌…");
         await checkWorker(c);
         const me = await workerApi("users/self", {}, c);
         if (!me || !me.id) throw new Error("Canvas 返回的用户信息不完整，本次配置未保存");
-        saveSetup(c);
+        await saveSetup(c);
         status("✅ 身份验证成功，配置已保存：" + (me.name || me.short_name || "已认证") + "。课程尚未读取，请点击“连接并生成看板”验证课程权限。", S_OK);
       });
     } catch (e) { status("❌ " + e.message, S_WARN); }
   };
   $("s-fetch").onclick = async () => {
     try {
-      await withHubTask(async () => {
+      await withCanvasTask(async () => {
         const c = readSetup();
         await checkWorker(c);
         const me = await workerApi("users/self", {}, c);
@@ -610,6 +757,7 @@ python serve_board.py</pre>
         status("✅ 完成：" + data.weeks[0].courses.length + " 门课程已生成看板", S_OK);
         boot(data);
         showFirstTip();
+        refreshNotice(data.weeks[0].warnings.length ? "看板已更新，部分内容未能读取，详见课程警告。" : "课程已更新并保存在本浏览器。");
         if (!data.weeks[0].warnings.length) ov.style.display = "none";
         else status("⚠️ 看板已生成，部分内容未能读取：\n" + data.weeks[0].warnings.join("\n"), S_WARN);
       });
@@ -712,14 +860,16 @@ python serve_board.py</pre>
     const file = $("s-import-file").files[0];
     if (!file) return;
     try {
-      await withHubTask(async () => {
+      await withCanvasTask(async () => {
         if (file.size > 10 * 1024 * 1024) throw new Error("备份文件超过 10 MB，请选择看板导出的 JSON 文件");
         const backup = validateBackup(JSON.parse(await file.text()));
         const selectedCanvas = normalizeOrigin($("s-canvas").value, "Canvas 地址");
         if (normalizeOrigin(backup.data.canvas_url, "备份学校地址") !== selectedCanvas)
           throw new Error("备份的学校与当前设置不同，请先在“其他学校”选项中填写对应 Canvas 地址");
-        storeTogether({ hubData: JSON.stringify(backup.data), hubLastState: JSON.stringify(backup.state) });
+        storeTogether({ hubData: JSON.stringify(backup.data), hubLastState: JSON.stringify(backup.state),
+          hubRefreshState: JSON.stringify({ version: 1, binding: await refreshBinding(hubCfg()), successAt: null }) });
         boot(backup.data);
+        updateRefreshReminder();
         status("✅ 已导入 " + backup.data.weeks.length + " 份历史记录；令牌未导入，请填写自己的令牌。", S_OK);
       });
     } catch (e) { status("❌ 无法导入：" + e.message, S_WARN); }
@@ -729,7 +879,9 @@ python serve_board.py</pre>
     if (!confirm("确定清除本浏览器里的全部看板数据与令牌？这不会撤销 Canvas 令牌或云端订阅；如已启用订阅，请先点击“停用旧版云端订阅”。")) return;
     try {
     ["hubData", "hubLastState", "hubWorker", "hubCanvasUrl", "hubToken",
-     "hubExpires", "hubSendKey", "hubSecret"].forEach((k) => HUB_STORE.del(k));
+     "hubExpires", "hubSendKey", "hubSecret", "hubUpdateReminder", "hubRefreshState"].forEach((k) => HUB_STORE.del(k));
+    reminderDismissed = "";
+    updateRefreshReminder();
     status("已清除。刷新页面将回到初始状态。");
     setTimeout(() => location.reload(), 700);
     } catch (e) { status("❌ 无法清除浏览器存储，请通过浏览器的本站数据设置处理", S_WARN); }
@@ -742,9 +894,14 @@ function readSetup() {
     expires: g("s-exp"), sendkey: "", secret: hubCfg().secret });
 }
 
-function saveSetup(inputCfg) {
+async function saveSetup(inputCfg) {
   const c = validateHubCfg(inputCfg || readSetup());
-  storeTogether(configValues(c));
+  const binding = await refreshBinding(c);
+  const values = configValues(c);
+  if (await refreshBinding(hubCfg()) !== binding)
+    values.hubRefreshState = JSON.stringify({ version: 1, binding, successAt: null });
+  storeTogether(values);
+  updateRefreshReminder();
   $("s-worker").value = c.worker;
   $("s-canvas").value = c.canvasUrl;
   return c;
@@ -807,10 +964,10 @@ function showFirstTip() {
   if (!main) return;
   const tip = document.createElement("div");
   tip.id = "first-tip";
-  tip.innerHTML = `🎉 <b>看板已就绪！</b>常用三件事：
-    ① 每周回来点一次顶部 <b>🔄</b> 更新数据；
+  tip.innerHTML = `<span>🎉 <b>看板已就绪！</b>常用三件事：
+    ① 点击顶部 <b>刷新课程</b> 查询最新数据，到期提醒可在设置中调整；
     ② 顶部 <b>📅 截止日历</b> 可导入手机，到点自动提醒；
-    ③ <b>⚙️ 设置</b> 里可下载离线版「我的学习网站.html」。
+    ③ <b>⚙️ 设置</b> 里可下载离线版「我的学习网站.html」。</span>
     <button title="知道了" style="margin-left:auto;flex:none">✕</button>`;
   tip.querySelector("button").onclick = () => {
     HUB_STORE.set("hubTipDone", "1");
@@ -822,30 +979,49 @@ function showFirstTip() {
 const refreshBtn = document.createElement("button");
 refreshBtn.id = "refresh-btn";
 refreshBtn.className = "icon-btn";
-refreshBtn.title = "更新数据：重新抓取 Canvas（约 10 秒）";
-refreshBtn.textContent = "🔄";
+refreshBtn.className = "icon-btn refresh-action";
+refreshBtn.title = "按已保存的配置查询最新课程，不提交设置中的草稿";
+refreshBtn.textContent = "刷新课程";
 document.getElementById("settings-btn").parentElement.insertBefore(
   refreshBtn, document.getElementById("settings-btn"));
 refreshBtn.onclick = async () => {
   const c = hubCfg();
   if (!c.worker || !c.token) { showSetup(); return; }
-  refreshBtn.textContent = "⏳";
-  refreshBtn.disabled = true;
+  if (hubBusy) return;
+  refreshBtn.textContent = "刷新中…";
+  refreshNotice("正在查询 Canvas，请稍候…");
   try {
-    await withHubTask(async () => {
+    await withCanvasTask(async () => {
       const data = await fetchAll();
       boot(data);
       showFirstTip();
+      const warnings = data.weeks[0].warnings;
+      refreshNotice(warnings.length ? "看板已更新，部分内容未能读取：" + warnings.join("；") : "课程已更新并保存在本浏览器。");
     });
   } catch (e) {
-    showSetup();
-    const st = document.getElementById("s-status");
-    if (st) { st.textContent = "❌ " + e.message; st.style.color = "#c0392b"; }
+    refreshNotice("本次未更新：" + e.message + "。旧看板保留；可在设置中检查配置。");
   } finally {
-    refreshBtn.textContent = "🔄";
-    refreshBtn.disabled = false;
+    refreshBtn.textContent = "刷新课程";
   }
 };
+const reminderRefresh = document.getElementById("reminder-refresh");
+if (reminderRefresh) reminderRefresh.onclick = () => refreshBtn.onclick();
+
+if (document.addEventListener) document.addEventListener("visibilitychange", updateRefreshReminder);
+if (window.addEventListener) {
+  window.addEventListener("focus", updateRefreshReminder);
+  window.addEventListener("pageshow", updateRefreshReminder);
+  window.addEventListener("storage", (e) => {
+    if (e.key === null || ["hubRefreshState", "hubData", "hubUpdateReminder", "hubToken", "hubCanvasUrl", "hubWorker"].includes(e.key)) {
+      // storage 事件不传递正文给其他服务，仅在同源浏览器内重新读取已保存的看板。
+      try {
+        const data = JSON.parse(HUB_STORE.get("hubData") || "null");
+        if (data && Array.isArray(data.weeks) && data.weeks.length) boot(data);
+      } catch (error) { refreshNotice("本地看板数据无法读取，请在设置中检查或恢复备份。"); }
+      updateRefreshReminder();
+    }
+  });
+}
 
 const _bootRaw = window.__HUB_BOOT__;
 window.__HUB_BOOT__ = function () {
@@ -856,6 +1032,7 @@ window.__HUB_BOOT__ = function () {
     return !!(d && d.weeks && d.weeks.length);
   } catch (e) { return false; } })();
   if (has) showFirstTip();
+  updateRefreshReminder();
 };
 
 /* ---------------- 入口接线 ---------------- */

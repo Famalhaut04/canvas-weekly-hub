@@ -23,7 +23,7 @@ function harness(seed = {}, route = async () => new Response("[]"), options = {}
     constructor() {
       this.style = {}; this.value = ""; this.textContent = "";
       this.disabled = false; this.href = "#";
-      this.parentElement = { insertBefore() {}, appendChild: (el) => nodes.set(el.id, el) };
+      this.parentElement = { insertBefore: (el) => nodes.set(el.id, el), appendChild: (el) => nodes.set(el.id, el) };
     }
     set innerHTML(html) {
       this.html = html;
@@ -37,7 +37,9 @@ function harness(seed = {}, route = async () => new Response("[]"), options = {}
     focus() { this.focused = true; }
     select() { this.selected = true; }
   }
-  for (const id of ["settings-btn", "ics-link", "star-count"]) nodes.set(id, new Element());
+  for (const id of ["settings-btn", "ics-link", "star-count", ...(options.reminder ?
+    ["refresh-time", "refresh-plan", "refresh-message", "refresh-reminder", "reminder-text", "reminder-later", "reminder-refresh"] : [])]) nodes.set(id, new Element());
+  const events = {};
   const storage = {
     getItem: (key) => values.has(key) ? values.get(key) : null,
     setItem: (key, value) => values.set(key, String(value)),
@@ -45,7 +47,7 @@ function harness(seed = {}, route = async () => new Response("[]"), options = {}
   };
   const calls = [];
   const context = vm.createContext({
-    URL, URLSearchParams, AbortController, Response, Event, Date, Uint8Array,
+    URL, URLSearchParams, AbortController, Response, Event, Date: options.Date || Date, Uint8Array, TextEncoder,
     crypto: webcrypto, localStorage: storage,
     setTimeout: (fn, delay) => { timers.set(++timerId, { fn, delay }); return timerId; },
     clearTimeout: (id) => timers.delete(id),
@@ -58,19 +60,21 @@ function harness(seed = {}, route = async () => new Response("[]"), options = {}
       getElementById: (id) => nodes.get(id) || null,
       createElement: () => new Element(), querySelector: () => null,
       body: { appendChild: (el) => nodes.set(el.id, el) },
+      addEventListener: (type, fn) => { events[type] = fn; }, hidden: false,
     },
-    window: { __HUB_BOOT__: () => {}, __HUB_WORKER_ORIGIN__: options.managedOrigin || "" },
-    navigator: {}, location: { reload() {} },
+    window: { __HUB_BOOT__: () => {}, __HUB_WORKER_ORIGIN__: options.managedOrigin || "",
+      addEventListener: (type, fn) => { events[type] = fn; } },
+    navigator: { locks: { request: async (name, settings, fn) => fn({ name }) } }, location: { reload() {} },
     confirm: () => false, alert() {}, boot() {},
     $: (id) => nodes.get(id),
   });
-  vm.runInContext(SOURCE + "\nglobalThis.api = {normalizeOrigin, validateHubCfg, hubCfg, fetchAll, apiAll, showSetup, withHubTask, requestText, readSetup, buildBackup, validateBackup};", context);
+  vm.runInContext(SOURCE + "\nglobalThis.api = {normalizeOrigin, validateHubCfg, hubCfg, fetchAll, apiAll, showSetup, withHubTask, withCanvasTask, requestText, readSetup, buildBackup, validateBackup, reminderPrefs, refreshBinding, currentRefreshState, legacyRefreshTime, updateRefreshReminder, saveSetup};", context);
   const form = (c = cfg) => {
     context.api.showSetup();
     for (const [id, field] of Object.entries({ "s-worker": "worker", "s-canvas": "canvasUrl",
       "s-token": "token", "s-exp": "expires", "s-sendkey": "sendkey" })) { if (nodes.has(id)) nodes.get(id).value = c[field]; }
   };
-  return { context, api: context.api, values, nodes, storage, timers, calls, form };
+  return { context, api: context.api, values, nodes, storage, timers, calls, form, events };
 }
 
 function response(data, status = 200) { return new Response(JSON.stringify(data), { status }); }
@@ -78,6 +82,297 @@ function saved(c = cfg) {
   return { hubWorker: c.worker, hubCanvasUrl: c.canvasUrl, hubToken: c.token,
     hubExpires: c.expires, hubSendKey: c.sendkey };
 }
+
+function clock(initial = Date.parse("2026-10-02T04:00:00Z")) {
+  let value = initial;
+  class Clock extends Date {
+    constructor(...args) { super(...(args.length ? args : [value])); }
+    static now() { return value; }
+  }
+  return { Date: Clock, now: () => value, advance: (ms) => { value += ms; } };
+}
+
+async function reminderHarness(age, options = {}) {
+  const time = options.time || clock();
+  const h = harness(saved(), options.route, { ...options, reminder: true, Date: time.Date });
+  const binding = await h.api.refreshBinding(cfg);
+  h.values.set("hubRefreshState", JSON.stringify({ version: 1, binding, successAt: time.now() - age }));
+  await h.api.updateRefreshReminder();
+  return { ...h, time };
+}
+
+test("72 小时边界只提示，不自动查询；时间按设备时区显示", async () => {
+  for (const age of [72 * 3600000 - 1, 72 * 3600000, 72 * 3600000 + 1]) {
+    const h = await reminderHarness(age);
+    assert.equal(h.nodes.get("refresh-reminder").hidden, age < 72 * 3600000);
+    assert.equal(h.calls.length, 0);
+    const stamp = JSON.parse(h.values.get("hubRefreshState")).successAt;
+    assert.ok(h.nodes.get("refresh-time").textContent.includes(new Date(stamp).toLocaleString("zh-CN", { hour12: false })));
+    assert.match(h.nodes.get("refresh-time").textContent, /设备时区/);
+  }
+});
+
+test("前台跨阈值与休眠恢复只检查提醒，后台取消定时", async () => {
+  const h = await reminderHarness(72 * 3600000 - 2000);
+  const scheduled = [...h.timers.values()].find((t) => t.delay === 2000);
+  assert.ok(scheduled);
+  h.time.advance(2000); await scheduled.fn();
+  assert.equal(h.nodes.get("refresh-reminder").hidden, false);
+  h.context.document.hidden = true; await h.events.visibilitychange();
+  assert.equal(h.timers.size, 0);
+  h.time.advance(10 * 86400000);
+  h.context.document.hidden = false; await h.events.visibilitychange(); await h.events.focus(); await h.events.pageshow();
+  assert.equal(h.nodes.get("refresh-reminder").hidden, false);
+  assert.equal(h.calls.length, 0);
+});
+
+test("暂不刷新不改成功时间，同页不重复，重开仍会提醒", async () => {
+  const h = await reminderHarness(4 * 86400000);
+  const original = h.values.get("hubRefreshState");
+  h.nodes.get("reminder-later").onclick(); await h.api.updateRefreshReminder();
+  await h.events.pageshow();
+  assert.equal(h.nodes.get("refresh-reminder").hidden, true);
+  assert.equal(h.values.get("hubRefreshState"), original);
+  assert.equal(h.calls.length, 0);
+  const reopened = harness(Object.fromEntries(h.values), undefined, { reminder: true, Date: h.time.Date });
+  await reopened.api.updateRefreshReminder();
+  assert.equal(reopened.nodes.get("refresh-reminder").hidden, false);
+  assert.equal(reopened.calls.length, 0);
+});
+
+test("自定义天数、关闭和重载只保存提醒字段，不提交 Token 草稿", async () => {
+  const h = await reminderHarness(2 * 86400000); h.form({ ...cfg, token: "unsaved-fixture" });
+  const original = h.values.get("hubRefreshState");
+  h.nodes.get("s-reminder-days").value = "2"; h.nodes.get("s-reminder-save").onclick();
+  await h.api.updateRefreshReminder();
+  assert.match(h.nodes.get("reminder-text").textContent, /满 2 天/);
+  assert.equal(h.nodes.get("refresh-reminder").hidden, false);
+  assert.equal(h.values.get("hubToken"), cfg.token);
+  assert.equal(h.values.get("hubRefreshState"), original);
+  h.nodes.get("s-reminder-enabled").checked = false; h.nodes.get("s-reminder-save").onclick();
+  await h.api.updateRefreshReminder();
+  assert.equal(h.nodes.get("refresh-reminder").hidden, true);
+  assert.equal(h.nodes.get("refresh-btn").disabled, false);
+  const next = harness(Object.fromEntries(h.values)); next.form();
+  assert.equal(next.nodes.get("s-reminder-enabled").checked, false);
+  assert.equal(next.nodes.get("s-reminder-days").value, "2");
+  assert.equal(h.calls.filter((c) => c.url.includes("/proxy/")).length, 0);
+});
+
+test("不接受零、负数、小数、空值或溢出的提醒天数", () => {
+  const h = harness(); h.form();
+  for (const value of ["0", "-1", "1.5", "", "9007199254740992"]) {
+    h.nodes.get("s-reminder-days").value = value; h.nodes.get("s-reminder-save").onclick();
+    assert.match(h.nodes.get("s-reminder-status").textContent, /未保存.*正整数/);
+    assert.equal(h.values.has("hubUpdateReminder"), false);
+  }
+});
+
+test("旧时间只按明确 UTC 偏移解释，模糊或无效时间保持未知", async () => {
+  const h = harness(saved(), undefined, { reminder: true });
+  const old = { canvas_url: cfg.canvasUrl, updated_at: "2026-10-01 12:30", tz_label: "UTC+8", weeks: [] };
+  h.values.set("hubData", JSON.stringify(old));
+  assert.equal((await h.api.currentRefreshState()).successAt, Date.parse("2026-10-01T04:30:00Z"));
+  assert.equal(h.api.legacyRefreshTime({ ...old, tz_label: "UTC+5.5" }), Date.parse("2026-10-01T07:00:00Z"));
+  for (const data of [{ ...old, tz_label: "Asia/Shanghai" }, { ...old, updated_at: "2026-02-30 12:00" },
+    { ...old, updated_at: "昨天" }, { ...old, tz_label: "" }, { ...old, updated_at: "2026-10-01 25:00" }]) {
+    h.values.set("hubData", JSON.stringify(data)); await h.api.updateRefreshReminder();
+    assert.match(h.nodes.get("refresh-time").textContent, /更新时间未知/);
+    assert.equal(h.nodes.get("refresh-reminder").hidden, true);
+  }
+  assert.equal(h.calls.length, 0);
+});
+
+test("成功查询并保存后才更新时间，手动刷新仅使用已保存配置", async () => {
+  const h = await reminderHarness(4 * 86400000, { route: async () => response([]) });
+  h.form({ ...cfg, token: "unsaved-fixture" });
+  await h.nodes.get("refresh-btn").onclick();
+  assert.equal(h.calls.filter((c) => c.url.includes("/proxy/")).length, 1);
+  assert.equal(h.calls.find((c) => c.url.includes("/proxy/")).options.headers["X-Canvas-Token"], cfg.token);
+  assert.equal(h.values.get("hubToken"), cfg.token);
+  assert.equal(JSON.parse(h.values.get("hubRefreshState")).successAt, h.time.now());
+  assert.equal(h.nodes.get("refresh-btn").disabled, false);
+  assert.equal(h.nodes.get("refresh-btn").textContent, "刷新课程");
+  assert.match(h.nodes.get("refresh-message").textContent, /已更新并保存/);
+  await h.api.updateRefreshReminder();
+  assert.equal(h.nodes.get("refresh-reminder").hidden, true);
+});
+
+test("401、403、服务错误保留原看板、快照和成功时间", async () => {
+  for (const status of [401, 403, 502, 503]) {
+    const h = await reminderHarness(4 * 86400000, { route: async () => response({}, status) });
+    h.values.set("hubData", "old-board"); h.values.set("hubLastState", "old-snapshot");
+    const original = h.values.get("hubRefreshState");
+    await h.nodes.get("refresh-btn").onclick();
+    assert.equal(h.values.get("hubData"), "old-board"); assert.equal(h.values.get("hubLastState"), "old-snapshot");
+    assert.equal(h.values.get("hubRefreshState"), original);
+    assert.equal(h.nodes.get("refresh-btn").disabled, false);
+    assert.match(h.nodes.get("refresh-message").textContent, status === 401 ? /令牌无效或已过期/ :
+      status === 403 ? /权限/ : /查询服务返回 HTTP.*部署.*不能判断令牌/);
+  }
+});
+
+test("刷新超时和网络中断不推进成功时间，也不反复弹窗", async () => {
+  const h = await reminderHarness(4 * 86400000, { route: async (url, options) => new Promise((resolve, reject) => {
+    options.signal.addEventListener("abort", () => reject(new Error("fixture aborted")));
+  }) });
+  h.values.set("hubData", "old-board"); const original = h.values.get("hubRefreshState");
+  const pending = h.nodes.get("refresh-btn").onclick();
+  while (!h.calls.length) await new Promise((resolve) => setImmediate(resolve));
+  [...h.timers.values()].find((t) => t.delay === 20000).fn(); await pending;
+  assert.equal(h.values.get("hubRefreshState"), original); assert.equal(h.values.get("hubData"), "old-board");
+  assert.match(h.nodes.get("refresh-message").textContent, /超过 20 秒/);
+  const offline = await reminderHarness(4 * 86400000, { route: async () => { throw new Error("fixture network unavailable"); } });
+  const before = offline.values.get("hubRefreshState"); await offline.nodes.get("refresh-btn").onclick();
+  assert.equal(offline.values.get("hubRefreshState"), before);
+  assert.match(offline.nodes.get("refresh-message").textContent, /本次未更新.*network unavailable/);
+  assert.equal(offline.nodes.has("setup-overlay"), false);
+});
+
+test("写入成功时间失败回滚整组存储，不能宣称刷新成功", async () => {
+  const h = await reminderHarness(4 * 86400000, { route: async () => response([]) });
+  h.values.set("hubData", "old-board"); h.values.set("hubLastState", "old-snapshot");
+  const original = h.values.get("hubRefreshState"), put = h.storage.setItem;
+  let fail = true;
+  h.storage.setItem = (key, value) => {
+    if (key === "hubRefreshState" && fail) { fail = false; throw new Error("quota"); }
+    put(key, value);
+  };
+  await h.nodes.get("refresh-btn").onclick();
+  assert.equal(h.values.get("hubData"), "old-board"); assert.equal(h.values.get("hubLastState"), "old-snapshot");
+  assert.equal(h.values.get("hubRefreshState"), original);
+  assert.match(h.nodes.get("refresh-message").textContent, /本次未更新.*空间不足/);
+});
+
+test("可选内容失败保存可用结果，成功时间与警告均保留", async () => {
+  const h = await reminderHarness(4 * 86400000, { route: async (url) => {
+    if (url.includes("/proxy/courses?")) return response([{ id: 1, name: "Fixture Course" }]);
+    if (url.includes("/files?")) return response({}, 403);
+    return response([]);
+  } });
+  await h.nodes.get("reminder-refresh").onclick();
+  assert.equal(JSON.parse(h.values.get("hubRefreshState")).successAt, h.time.now());
+  assert.equal(JSON.parse(h.values.get("hubData")).weeks[0].warnings.length, 1);
+  assert.match(h.nodes.get("refresh-message").textContent, /部分内容未能读取.*课件/);
+});
+
+test("更换令牌或学校后不沿用旧身份更新时间，仅检查不制造成功时间", async () => {
+  const h = await reminderHarness(4 * 86400000); h.form();
+  const original = h.values.get("hubRefreshState");
+  await h.api.saveSetup(cfg); assert.equal(h.values.get("hubRefreshState"), original);
+  await h.api.saveSetup({ ...cfg, token: "new-fixture-token" });
+  assert.equal(JSON.parse(h.values.get("hubRefreshState")).successAt, null);
+  await h.api.updateRefreshReminder(); assert.match(h.nodes.get("refresh-time").textContent, /未知/);
+  h.values.set("hubCanvasUrl", "https://other-canvas.example");
+  assert.equal((await h.api.currentRefreshState()).successAt, null);
+});
+
+test("查询途中另页更换配置，结果不覆盖新配置或旧看板", async () => {
+  let release;
+  const h = await reminderHarness(4 * 86400000, { route: async () => new Promise((resolve) => { release = resolve; }) });
+  h.values.set("hubData", "old-board"); const original = h.values.get("hubRefreshState");
+  const pending = h.nodes.get("refresh-btn").onclick();
+  while (!release) await new Promise((resolve) => setImmediate(resolve));
+  h.values.set("hubToken", "other-fixture-token"); release(response([])); await pending;
+  assert.equal(h.values.get("hubData"), "old-board"); assert.equal(h.values.get("hubRefreshState"), original);
+  assert.match(h.nodes.get("refresh-message").textContent, /配置已.*更改/);
+});
+
+test("多入口和两页共享锁：竞争操作不查询、不排队、结束恢复", async () => {
+  let active = false, release;
+  const locks = { request: async (name, options, fn) => {
+    assert.equal(name, "canvas-hub-user-query"); assert.equal(options.ifAvailable, true);
+    if (active) return fn(null);
+    active = true; try { return await fn({ name }); } finally { active = false; }
+  } };
+  const first = await reminderHarness(4 * 86400000, { route: async () => new Promise((resolve) => { release = resolve; }) });
+  const second = await reminderHarness(4 * 86400000);
+  first.context.navigator.locks = second.context.navigator.locks = locks;
+  const pending = first.nodes.get("refresh-btn").onclick();
+  while (!release) await new Promise((resolve) => setImmediate(resolve));
+  await first.nodes.get("reminder-refresh").onclick(); await second.nodes.get("refresh-btn").onclick();
+  assert.equal(first.calls.filter((c) => c.url.includes("/proxy/")).length, 1);
+  assert.equal(second.calls.length, 0);
+  assert.match(second.nodes.get("refresh-message").textContent, /另一个标签页/);
+  release(response([])); await pending;
+  assert.equal(first.nodes.get("reminder-refresh").disabled, false);
+  assert.equal(second.nodes.get("refresh-btn").disabled, false);
+});
+
+test("缺少浏览器锁时明确提示，保存禁用时不误保存提醒", async () => {
+  const h = await reminderHarness(4 * 86400000); h.context.navigator.locks = undefined;
+  await h.nodes.get("refresh-btn").onclick();
+  assert.match(h.nodes.get("refresh-message").textContent, /不支持多标签页刷新保护/);
+  assert.equal(h.calls.length, 0);
+  h.form(); h.storage.setItem = () => { throw new Error("blocked"); };
+  h.nodes.get("s-reminder-save").onclick();
+  assert.match(h.nodes.get("s-reminder-status").textContent, /未保存.*浏览器无法保存/);
+  assert.equal(h.values.has("hubUpdateReminder"), false);
+});
+
+test("清除数据同步清除提醒与成功时间；导入不伪造本机查询成功", async () => {
+  const h = await reminderHarness(4 * 86400000); h.form();
+  const data = { canvas_url: cfg.canvasUrl, updated_at: "2026-10-01 12:00", tz_label: "UTC+8",
+    weeks: [{ date: "2026-10-01", courses: [] }] };
+  const backup = { format: "canvas-weekly-hub-backup", version: 1, data, state: { assignments: {} } };
+  h.nodes.get("s-import-file").files = [{ size: 20, text: async () => JSON.stringify(backup) }];
+  await h.nodes.get("s-import-file").onchange();
+  assert.equal((await h.api.currentRefreshState()).successAt, null);
+  h.values.set("hubUpdateReminder", JSON.stringify({ enabled: false, days: 5 }));
+  h.context.confirm = () => true; h.nodes.get("s-clear").onclick(); await h.api.updateRefreshReminder();
+  for (const key of ["hubToken", "hubData", "hubRefreshState", "hubUpdateReminder"]) assert.equal(h.values.has(key), false);
+  assert.equal(h.api.reminderPrefs().days, 3);
+  assert.equal(h.nodes.get("refresh-reminder").hidden, true);
+});
+
+test("Issue #4 夹具：读取完整但显示范围不会因重复刷新而扩大", async () => {
+  const time = clock(), iso = (days) => new Date(time.now() + days * 86400000).toISOString();
+  const assignment = (id, name, created, due, wf = "unsubmitted", url = "https://canvas.example/assignments/" + id) =>
+    ({ id, name, created_at: iso(created), updated_at: iso(created), due_at: due === null ? null : iso(due),
+      html_url: url, submission: { workflow_state: wf } });
+  const tasks = [assignment(1, "旧任务远期截止", -30, 30), assignment(2, "近期新增远期截止", -1, 30),
+    assignment(3, "旧任务近期截止", -30, 2), assignment(4, "已提交近期截止", -30, 3, "submitted"),
+    assignment(5, "无截止任务", -1, null), assignment(6, "逾期任务", -1, -1),
+    assignment(7, "七日当天晚间任务", -30, 7.49), assignment(8, "个人截止覆盖", -30, 4)];
+  const h = harness(saved(), async (url) => {
+    if (url.includes("/proxy/courses?")) return response([{ id: 1, name: "Fixture Course" }]);
+    if (url.includes("/assignments?")) return response(tasks);
+    return response([]);
+  }, { Date: time.Date });
+  const template = fs.readFileSync(path.join(ROOT, "site-template/index.html"), "utf8");
+  const source = template.slice(template.indexOf("function allTodo("), template.indexOf("function render()"));
+  vm.runInContext(source + "\nglobalThis.fixtureTodo = allTodo;", h.context);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const data = await h.api.fetchAll(cfg);
+    const names = Array.from(h.context.fixtureTodo(data.weeks[0]), (task) => task.name);
+    assert.deepEqual(names, ["旧任务近期截止", "已提交近期截止", "个人截止覆盖", "近期新增远期截止"]);
+    assert.equal(Object.keys(JSON.parse(h.values.get("hubLastState")).assignments[1]).length, 8);
+    assert.equal(JSON.parse(h.values.get("hubData")).weeks[0].courses[0].new_assignments.length, 3);
+  }
+  // 用户接口给出的 due_at 就是本程序使用的截止时间；没有请求课程 overrides 来重算。
+  assert.ok(h.calls.filter((c) => c.url.includes("/assignments?")).every((c) => c.url.includes("include%5B%5D=submission")));
+  const sameName = { name: "同名测试", due_iso: iso(2), url: "" };
+  const collision = h.context.fixtureTodo({ courses: ["A", "B"].map((name) =>
+    ({ name, url: "https://canvas.example/courses/" + name, upcoming: [sameName], new_assignments: [] })) });
+  assert.equal(collision.length, 1, "当前缺少 URL 的跨课同名任务会合并，记录为独立修复建议，不在本轮更改范围");
+});
+
+test("Issue #4 分页夹具：第二页作业进入快照和待办", async () => {
+  const time = clock();
+  const old = Array.from({ length: 100 }, (_, id) => ({ id, name: "Fixture Old " + id,
+    created_at: "2020-01-01T00:00:00Z", due_at: null }));
+  const h = harness(saved(), async (url) => {
+    if (url.includes("/proxy/courses?")) return response([{ id: 1, name: "Fixture Course" }]);
+    if (url.includes("/assignments?")) return response(new URL(url).searchParams.get("page") === "1" ? old : [{
+      id: 100, name: "Fixture Page Two", created_at: "2020-01-01T00:00:00Z",
+      due_at: new Date(time.now() + 86400000).toISOString(), html_url: "https://canvas.example/assignments/100" }]);
+    return response([]);
+  }, { Date: time.Date });
+  const data = await h.api.fetchAll(cfg);
+  assert.equal(Object.keys(JSON.parse(h.values.get("hubLastState")).assignments[1]).length, 101);
+  assert.equal(data.weeks[0].courses[0].upcoming[0].name, "Fixture Page Two");
+  assert.equal(h.calls.filter((c) => c.url.includes("/assignments?")).length, 2);
+});
 
 test("agent 路线切换不验证或保存 Token，返回网页保留草稿", () => {
   const h = harness(); h.form();

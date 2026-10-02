@@ -7,7 +7,7 @@ const { spawn } = require("node:child_process");
 const assert = require("node:assert/strict");
 
 const ROOT = path.resolve(__dirname, "..");
-const ARTIFACTS = path.join(__dirname, "artifacts", "1002_配置流程核对_v1");
+const ARTIFACTS = path.join(__dirname, "artifacts", "1002_手动刷新与更新提醒_v1");
 const EDGE = process.env.CANVAS_TEST_EDGE || "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe";
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -24,12 +24,14 @@ async function main() {
     "about:blank"], { windowsHide: true, stdio: "ignore" });
   const worker = (await import("data:text/javascript;base64," + Buffer.from(fs.readFileSync(path.join(ROOT, "worker.js"), "utf8")).toString("base64"))).default;
   const nativeFetch = global.fetch; const canvasCalls = [];
+  let holdCourse = null;
   global.fetch = async (url, options) => {
     const target = new URL(url);
     if (target.hostname === "127.0.0.1") return nativeFetch(url, options);
     assert.equal(target.hostname, "canvas.example", "不允许测试访问真实学校");
     assert.equal(options.headers.Authorization, "Bearer fixture-token");
     canvasCalls.push(target.pathname);
+    if (target.pathname.endsWith("/courses") && holdCourse) await holdCourse;
     const now = new Date().toISOString();
     let data = [];
     if (target.pathname.endsWith("/users/self")) data = { id: 1, name: "Fixture User" };
@@ -72,14 +74,14 @@ async function main() {
       clearTimeout(waiting.timer);
       message.error ? waiting.reject(new Error(message.error.message)) : waiting.resolve(message.result);
     });
-    send = (method, params = {}) => new Promise((resolve, reject) => {
+    send = (method, params = {}, sessionId) => new Promise((resolve, reject) => {
       const id = ++nextId;
       const timer = setTimeout(() => { pending.delete(id); reject(new Error("CDP timeout: " + method)); }, 5000);
       pending.set(id, { resolve, reject, timer });
-      socket.send(JSON.stringify({ id, method, params }));
+      socket.send(JSON.stringify({ id, method, params, sessionId }));
     });
-    const evaluate = async (expression) => {
-      const result = await send("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true });
+    const evaluate = async (expression, sessionId) => {
+      const result = await send("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true }, sessionId);
       if (result.exceptionDetails) throw new Error(JSON.stringify(result.exceptionDetails));
       return result.result.value;
     };
@@ -228,6 +230,92 @@ async function main() {
     await send("Page.reload"); await sleep(400);
     assert.equal(await evaluate("document.body.textContent.includes('Fixture Assignment')"), true);
     console.log("PASS reload restores local history");
+
+    // 可控时钟：到期只提示；所有上游调用仍是 localhost Worker 的虚构夹具。
+    const beforeReminder = canvasCalls.length;
+    const boundaries = await evaluate(`(async () => {
+      window.__NativeDate = Date;
+      const state = JSON.parse(localStorage.getItem('hubRefreshState'));
+      window.__fixtureClock = state.successAt + 72 * 3600000 - 1;
+      window.Date = class extends __NativeDate {
+        constructor(...args) { super(...(args.length ? args : [window.__fixtureClock])); }
+        static now() { return window.__fixtureClock; }
+      };
+      await updateRefreshReminder(); const before = document.getElementById('refresh-reminder').hidden;
+      __fixtureClock += 1; await updateRefreshReminder();
+      return { before, at: document.getElementById('refresh-reminder').hidden,
+        message: document.getElementById('reminder-text').textContent, time: document.getElementById('refresh-time').textContent };
+    })()`);
+    assert.equal(boundaries.before, true); assert.equal(boundaries.at, false);
+    assert.match(boundaries.message, /满 3 天/); assert.match(boundaries.time, /上次成功更新/);
+    await evaluate("document.dispatchEvent(new Event('visibilitychange')); window.dispatchEvent(new Event('focus')); window.dispatchEvent(new Event('pageshow'))");
+    await sleep(100); assert.equal(canvasCalls.length, beforeReminder);
+    console.log("PASS real browser 72h boundary, wake checks and reminder without Canvas requests");
+    for (const mode of [{ name: 'desktop', width: 1440, height: 1000, mobile: false },
+      { name: 'mobile', width: 390, height: 844, mobile: true }]) {
+      await send('Emulation.setDeviceMetricsOverride', { width: mode.width, height: mode.height, deviceScaleFactor: 1, mobile: mode.mobile });
+      assert.equal(await evaluate("document.documentElement.scrollWidth <= innerWidth + 1"), true);
+      assert.equal(await evaluate("document.getElementById('reminder-refresh').getBoundingClientRect().width > 60"), true);
+      const shot = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
+      fs.writeFileSync(path.join(ARTIFACTS, '1002_更新提醒_' + mode.name + '_v1.png'), Buffer.from(shot.data, 'base64'));
+    }
+    await evaluate("document.getElementById('reminder-later').focus()");
+    await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', text: '\r', unmodifiedText: '\r', windowsVirtualKeyCode: 13 });
+    await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
+    await sleep(100);
+    assert.equal(await evaluate("document.getElementById('refresh-reminder').hidden"), true);
+    assert.equal(canvasCalls.length, beforeReminder);
+    const preferences = await evaluate(`(async () => {
+      showSetup(); document.getElementById('s-token').value = 'unsaved-fixture-token';
+      document.getElementById('s-reminder-days').value = '2'; document.getElementById('s-reminder-save').click();
+      await updateRefreshReminder();
+      const text = document.getElementById('reminder-text').textContent;
+      document.getElementById('s-reminder-enabled').checked = false; document.getElementById('s-reminder-save').click();
+      await updateRefreshReminder();
+      return { text, token: localStorage.getItem('hubToken'), hidden: document.getElementById('refresh-reminder').hidden,
+        enabled: document.getElementById('refresh-btn').disabled, prefs: reminderPrefs() };
+    })()`);
+    assert.match(preferences.text, /满 2 天/); assert.equal(preferences.token, 'fixture-token');
+    assert.equal(preferences.hidden, true); assert.equal(preferences.enabled, false);
+    assert.deepEqual(preferences.prefs, { enabled: false, days: 2 });
+    await evaluate("document.getElementById('s-reminder-title').scrollIntoView({block:'start'})");
+    assert.equal(await evaluate("document.getElementById('setup-overlay').scrollWidth <= innerWidth + 1"), true);
+    const preferencesShot = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
+    fs.writeFileSync(path.join(ARTIFACTS, '1002_提醒设置_mobile_v1.png'), Buffer.from(preferencesShot.data, 'base64'));
+    await evaluate("document.getElementById('s-close').click(); window.Date = __NativeDate");
+    console.log('PASS keyboard dismissal and mobile preferences; Token draft remains unsaved');
+
+    // 两个真实标签页争抢同一个浏览器锁，第二页不排队抓取。
+    const second = await send('Target.createTarget', { url: origin + '/' });
+    const attached = await send('Target.attachToTarget', { targetId: second.targetId, flatten: true });
+    const secondSession = attached.sessionId;
+    for (let i = 0; i < 50; i++) {
+      if (await evaluate("document.readyState === 'complete' && !!document.getElementById('refresh-btn')", secondSession)) break;
+      await sleep(100);
+    }
+    assert.equal(await evaluate("!!navigator.locks", secondSession), true);
+    assert.equal(await evaluate("reminderPrefs().enabled", secondSession), false);
+    assert.equal(canvasCalls.length, beforeReminder);
+    let releaseCourse;
+    holdCourse = new Promise((resolve) => { releaseCourse = resolve; });
+    try {
+      await evaluate("window.__pendingRefresh = document.getElementById('refresh-btn').onclick(); true");
+      for (let i = 0; i < 50 && canvasCalls.length === beforeReminder; i++) await sleep(20);
+      assert.equal(canvasCalls.length, beforeReminder + 1);
+      assert.equal(await evaluate("document.getElementById('refresh-btn').disabled"), true);
+      await evaluate("document.getElementById('refresh-btn').onclick()", secondSession);
+      assert.match(await evaluate("document.getElementById('refresh-message').textContent", secondSession), /另一个标签页/);
+      assert.equal(canvasCalls.length, beforeReminder + 1);
+    } finally { holdCourse = null; releaseCourse(); }
+    await evaluate("window.__pendingRefresh"); await sleep(100);
+    assert.equal(canvasCalls.length, beforeReminder + 4);
+    assert.equal(await evaluate("document.getElementById('refresh-btn').disabled"), false);
+    assert.equal(await evaluate("localStorage.getItem('hubToken')"), 'fixture-token');
+    const latest = await evaluate("JSON.parse(localStorage.getItem('hubRefreshState')).successAt");
+    assert.equal(await evaluate("JSON.parse(localStorage.getItem('hubRefreshState')).successAt", secondSession), latest);
+    await send('Target.closeTarget', { targetId: second.targetId });
+    console.log('PASS two real tabs: one refresh performs exactly 4 fixture API calls; competing tab makes 0');
+
     await send("Page.navigate", { url: origin + "/overview" }); await sleep(400);
     assert.equal(await evaluate("document.querySelectorAll('tbody tr').length"), 6);
     assert.equal(await evaluate("document.documentElement.scrollWidth <= innerWidth + 1"), true);
