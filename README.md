@@ -21,8 +21,10 @@
 
 **[打开项目入口](https://famalhaut04.github.io/canvas-weekly-hub/web/)**
 
+先确认学校允许个人 API 使用。本项目使用手动令牌，不代表校方批准的应用；[Canvas 官方要求面向其他用户的应用使用 OAuth](https://developerdocs.instructure.com/services/canvas/oauth2/file.oauth)，个人自部署适用范围需向学校确认。
+
 1. 创建自己的助手：一键部署，或用邮箱登录 Cloudflare 后复制部署代码。
-2. 打开 Cloudflare 给出的自己的网址，看到“连接你的 Canvas”。
+2. 从 Worker 概览 / Domains & Routes 打开自己的正式网址，看到“连接你的 Canvas”；不用编辑器预览网址。
 3. 粘贴自己的 Canvas 令牌，点击“连接并生成看板”。
 
 | 创建方式 | 需要什么 | 操作 |
@@ -30,11 +32,15 @@
 | [一键部署](https://deploy.workers.cloudflare.com/?url=https://github.com/Famalhaut04/canvas-weekly-hub) | Cloudflare + GitHub 账号 | 授权、部署，打开自己的网址 |
 | 仅邮箱方式 | Cloudflare 账号 | 复制部署代码 → Worker 编辑器全选替换 → Deploy |
 
-主流程只填令牌；其他学校、到期日按需展开。教程：[零基础部署](docs/Cloudflare部署图文教程.md) · [使用指南](docs/网页版使用指南.md)。若网络无法访问自己的 `workers.dev` 网址，请确认网络可达或使用自己绑定的可达域名。
+主流程只填令牌；其他学校、到期日按需展开。助手的到期日是选填提醒，学校生成页可能必填；“仅检查连接”验证身份，不证明课程权限。教程：[零基础部署](docs/Cloudflare部署图文教程.md) · [使用指南](docs/网页版使用指南.md)。若网络无法访问自己的 `workers.dev` 网址，请确认网络可达或使用自己绑定的可达域名。
 
 ## 有 agent 经验：本地运行
 
-克隆仓库，复制 `config/canvas_config.example.json` 为 `canvas_config.json`，填写学校地址和令牌。Python 3.8+，仅依赖标准库。
+首次配置选择“升级版”，可展开本地 Python / agent 步骤并复制不含凭证的提示词；“基础版”提供网页部署路线。
+
+获取当前源码可克隆 main，或下载 [v2.2 更新源码包](https://github.com/Famalhaut04/canvas-weekly-hub/releases/download/v2.2/canvas-weekly-hub-v2.2-source.zip)。Release 自带的 Source code (zip / tar.gz) 对应保留的历史标签，不包含本次同版本更新；请选择上述附件。
+
+下载或克隆仓库，复制 `config/canvas_config.example.json` 为 `canvas_config.json`，在本地填写学校地址和令牌，不把 Token 粘贴进聊天。需要已有 Python 3.8+，仅依赖标准库。
 
 ```bash
 python canvas_weekly_report.py --check-config
@@ -42,9 +48,9 @@ python canvas_weekly_report.py
 python serve_board.py
 ```
 
-第一条只检查配置；第二条生成周报、看板、ICS，并按配置下载课件；第三条提供 `http://localhost:8137/` 与页内刷新。也可以双击生成的“我的学习网站.html”。
+在项目目录用同一个解释器执行。第一条只检查配置格式，不验证学校权限；第二条生成周报、看板、ICS，并按配置下载课件；第三条提供 `http://localhost:8137/` 与页内刷新。也可以双击生成的“我的学习网站.html”快照，离线文件不会自动抓取。
 
-agent 或计划任务可定时运行。GitHub 备份默认关闭，开启时结果会上传到配置的仓库；只使用自己的私有仓库。详见 [本地部署指南](docs/部署指南.md)。
+本地 Python 不需要 Cloudflare、KV 或云端定时器。agent 或计划任务可定时运行，电脑、运行环境和网络需要在线。保持 github.push_enabled=false；云端 agent 读取课程内容或凭证可能将它们发送给模型服务商，不能承诺全程本机处理。详见 [本地部署指南](docs/部署指南.md) 和 [可复制提示词](docs/1002_agent本地配置提示词_v1.md)。
 
 ## 旧用户升级
 
@@ -52,6 +58,8 @@ agent 或计划任务可定时运行。GitHub 备份默认关闭，开启时结�
 - 历史迁移：旧页面在“离线查看 / 旧版数据迁移”中备份，新网址导入，再填写令牌。导入会替换当前看板，建议先备份。
 - 停用旧订阅：升级 Worker 后旧 Cron 不再执行抓取或推送；若原浏览器保留订阅密钥，可点“停用旧版云端订阅”移除旧配置和快照。也可在自己的 Cloudflare 删除旧 KV 配置、移除 Cron，并在 Canvas 撤销不用的令牌。清除本机数据不能撤销云端配置。
 - 原公共入口仍支持使用自己的旧 Worker 查询课程，不自动清除浏览器历史。
+
+停用旧订阅时需保留原 KV 绑定与原浏览器密钥，停用成功后再解绑；只删除该密钥的 cfg: / snap:，旧 KV 不会自动清空。不同设备、浏览器、网址的历史不自动同步。更早旧版不一定有 JSON 备份按钮，不能承诺直接迁移。
 
 ## 主要文件
 
@@ -70,8 +78,12 @@ agent 或计划任务可定时运行。GitHub 备份默认关闭，开启时结�
 
 无课程数据遥测，不默认启用 Worker 请求日志；代理只允许课程查询接口，不跟随携带令牌的重定向，敏感响应不缓存。星数展示会请求 GitHub 公共 API，**不携带 Canvas 令牌或课程数据**。导出的看板、日历与备份含个人课程信息，请妥善保管。
 
+网页代码托管在 Worker，个人数据保存在浏览器，不能混为“看板全在云端”。离线 HTML 是导出时快照；JSON 排除配置凭证不代表匿名化。清除浏览器数据不撤销学校 Token 或清理旧云端凭证。
+
 ## v2.2 公告
 
 网页与代理统一部署、令牌一键连接、可选项折叠、历史备份迁移、失败保护、手机布局与隐私改进。见 [简短公告](content/1002_v2.2更新公告_v1.md)、[GitHub Release](https://github.com/Famalhaut04/canvas-weekly-hub/releases/tag/v2.2)、[更新记录](CHANGELOG.md)。
+
+2026-10-02 同版本更新：同步基础版 / 升级版入口、配置教程和 Release 的完整 worker.js 附件，并提供更新源码包；版本保持 v2.2，个人 Worker 仍需自行更新。发布前来源差异与待实测步骤见 [部署与令牌核对报告](docs/1002_部署与令牌配置核对_v1.md)，发布核验见 [同版本发布记录](docs/1002_v2.2同版本发布记录_v1.md)。
 
 [工作原理](docs/工作原理.md) · [验证记录](docs/1002_v2.2一体化升级验收_v1.md) · [MIT 许可证](LICENSE)

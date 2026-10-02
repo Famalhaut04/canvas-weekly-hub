@@ -77,7 +77,7 @@ async function withHubTask(action) {
   if (hubBusy) throw new Error("已有操作正在进行，请等待完成后再试");
   hubBusy = true;
   const ids = ["s-test", "s-fetch", "s-unsub", "s-close", "s-close2", "s-clear", "refresh-btn", "s-import", "s-backup"];
-  ids.push("s-worker", "s-canvas", "s-token", "s-exp");
+  ids.push("s-worker", "s-canvas", "s-token", "s-exp", "s-web-entry", "s-agent-entry");
   const buttons = ids.map((id) => document.getElementById(id)).filter(Boolean);
   const disabled = buttons.map((b) => b.disabled);
   buttons.forEach((b) => { b.disabled = true; });
@@ -404,6 +404,18 @@ function downloadIcs() {
 
 /* ---------------- 设置浮层 ---------------- */
 
+const AGENT_SETUP_PROMPT = [
+  "请协助我在本机配置 Canvas Weekly Hub v2.2 的 Python 路线。",
+  "1. 先读取 README.md、docs/部署指南.md、config/canvas_config.example.json、canvas_weekly_report.py 和 serve_board.py，按实际实现操作。先确认学校允许个人 API 使用；此项目使用手动令牌，不能据此认定是学校批准的应用。",
+  "2. 优先使用已有 Python 3.8+ 环境；引擎仅用标准库。安装软件或依赖前征求同意。不要把 agent 路线描述成无需运行环境。",
+  "3. 复制配置示例为本地 canvas_config.json，让我自己在本地填写学校 Canvas 地址与 Token，不要求把真实 Token 粘贴进聊天或提示词。不要读取或输出 Token 到聊天、日志、截图或 Git 提交；排错只展示脱敏信息。",
+  "4. 保持 github.push_enabled=false，不自动上传课程数据，不自动 commit、push 或部署云端资源。",
+  "5. 用选定的 Python 解释器先执行 canvas_weekly_report.py --check-config；该检查仅验证配置格式，不证明令牌或课程权限有效。通过后再运行 canvas_weekly_report.py，依据真实输出汇报，不编造课程内容。",
+  "6. 成功后打开生成的“我的学习网站.html”离线快照，或用同一解释器运行 serve_board.py，访问 http://localhost:8137/。默认配置与产物在项目目录；设置 CANVAS_HUB_DATA_DIR 后使用该目录。",
+  "7. 如需自动更新，配置本机 agent 或系统计划任务定时运行引擎，电脑与运行环境需要在线。本地 Python 直接查询学校，不需要 Cloudflare、KV 或云端定时器。",
+  "8. 若你是云端 agent，请在读取配置或课程产物前说明：输入的凭证、读取的课程内容可能进入模型服务商，不能宣称全程只在本机处理。优先让我自行填 Token 并运行，只提供脱敏的报错。"
+].join("\n");
+
 function showSetup() {
   let ov = document.getElementById("setup-overlay");
   if (ov) {
@@ -434,7 +446,35 @@ function showSetup() {
     <div class="bar">
       <a class="btn" id="s-cityu-login" href="https://canvas.cityu.edu.hk/" target="_blank" rel="noopener noreferrer">登录城大 Canvas ↗</a>
     </div>
-    <p class="hint">先登录学校 Canvas，再到“账户 → 设置”获取访问令牌。</p>
+    <p class="hint">先确认学校允许个人 API 使用，再登录学校 Canvas，到“账户 → 设置”获取访问令牌。</p>
+    <div class="bar" aria-label="选择配置方式">
+      <button class="btn primary" id="s-web-entry" aria-controls="s-web-panel" aria-expanded="true">基础版</button>
+      <button class="btn" id="s-agent-entry" aria-controls="s-agent-panel" aria-expanded="false">升级版</button>
+    </div>
+    <p class="hint">基础版：网页部署与看板，适合普通用户。升级版：本地 Python / agent 配置，适合有 agent 使用经验的用户。</p>
+    <section id="s-agent-panel" class="fstep" hidden>
+      <div class="fstep-h">本地 Python / agent 配置</div>
+      <ol class="setup-steps">
+        <li>下载或克隆项目，优先使用已有 Python 3.8+ 环境。引擎仅用标准库；本路线需要电脑上的运行环境。</li>
+        <li>复制 config/canvas_config.example.json 为 canvas_config.json，在本地填写学校 Canvas 地址和自己的 Token，保持 github.push_enabled=false。</li>
+        <li>先执行配置检查，通过后再运行抓取引擎。检查只验证格式，不验证学校权限。</li>
+        <li>成功后打开“我的学习网站.html”离线快照；或启动 serve_board.py，访问 http://localhost:8137/ 查看本地看板。</li>
+        <li>自动更新由自己的 agent 或系统计划任务定时启动引擎；电脑、运行环境和网络需要在线。</li>
+      </ol>
+      <pre class="agent-code">python canvas_weekly_report.py --check-config
+python canvas_weekly_report.py
+python serve_board.py</pre>
+      <p class="hint">在项目目录使用同一个 Python 解释器执行。本地 Python 直接查询学校，不需要 Cloudflare、KV 或云端定时器。</p>
+      <p class="hint">不要把真实 Token 发到聊天。云端 agent 读取凭证或课程内容时，这些信息可能进入模型服务商，不能称为全程本机处理。</p>
+      <div class="bar"><button class="btn primary" id="s-agent-copy">复制给 agent 的配置提示词</button>
+        <a class="btn" href="https://github.com/Famalhaut04/canvas-weekly-hub/blob/main/docs/%E9%83%A8%E7%BD%B2%E6%8C%87%E5%8D%97.md" target="_blank" rel="noopener noreferrer">本地部署指南 ↗</a></div>
+      <div id="s-agent-status" class="status" role="status" aria-live="polite"></div>
+      <details id="s-agent-copy-details" class="faq"><summary>查看并手动复制提示词</summary>
+        <label for="s-agent-prompt">提示词不包含你的配置或 Token</label>
+        <textarea id="s-agent-prompt" rows="9" readonly spellcheck="false"></textarea>
+      </details>
+    </section>
+    <div id="s-web-panel">
 
     <section id="s-deploy" ${HUB_MANAGED_ORIGIN ? "hidden" : ""} class="fstep">
       <div class="fstep-h">第一次使用：选择一种创建方式</div>
@@ -442,13 +482,13 @@ function showSetup() {
       <p class="hint">按部署页面完成授权，部署成功后打开自己的网址。网页与查询代理一起部署，数据不经过作者服务器。</p>
       <details class="faq" id="s-email"><summary>只有邮箱？按这 3 步创建</summary>
         <ol class="setup-steps">
-          <li>用邮箱登录 <a href="https://dash.cloudflare.com" target="_blank" rel="noopener">Cloudflare</a>，进入 Workers，创建一个 Worker 并 Deploy。</li>
+          <li>注册并验证邮箱，登录 <a href="https://dash.cloudflare.com" target="_blank" rel="noopener">Cloudflare</a>，进入 Workers &amp; Pages → Create application，选择 Hello World 创建 Worker 并 Deploy。</li>
           <li>点击下方“复制部署代码”，在 Edit code 中全选替换原代码，再点 Deploy。</li>
-          <li>打开 Cloudflare 给你的网址；看到“连接你的 Canvas”后粘贴令牌。</li>
+          <li>从 Worker 概览 / Domains &amp; Routes 打开正式网址，收藏它；不要用编辑器预览网址。看到“连接你的 Canvas”后再填写令牌。</li>
         </ol>
         <div class="bar"><button class="btn primary" id="s-copycode">复制部署代码</button>
           <a class="btn" href="../worker.js" download="canvas-weekly-hub-v2.2.js">下载部署代码</a></div>
-        <p class="hint">不需要 KV、定时器或 SendKey，也不用安装软件。</p>
+        <p class="hint">复制的是完整 worker.js，不是 worker/runtime.js。创建按钮名称可能变化，详见下方教程。不需要 KV、定时器或 SendKey，也不用安装软件。</p>
       </details>
       <p class="hint"><a href="https://github.com/Famalhaut04/canvas-weekly-hub/blob/main/docs/Cloudflare%E9%83%A8%E7%BD%B2%E5%9B%BE%E6%96%87%E6%95%99%E7%A8%8B.md" target="_blank" rel="noopener">打开分步部署教程</a></p>
     </section>
@@ -457,12 +497,12 @@ function showSetup() {
       <div class="frow" ${HUB_MANAGED_ORIGIN ? "hidden" : ""}><label for="s-worker">小助手地址</label>
         <input id="s-worker" type="url" autocomplete="off" spellcheck="false" placeholder="https://你的助手.workers.dev"></div>
       <div class="frow"><label for="s-token">Canvas 令牌</label><input id="s-token" type="password" autocomplete="off" spellcheck="false" placeholder="粘贴自己的访问令牌"></div>
-      <p class="hint">从 <a id="s-token-help" href="https://canvas.cityu.edu.hk/profile/settings" target="_blank" rel="noopener">Canvas 账户 → 设置 → 新访问令牌</a> 获取，生成后立即复制。</p>
+      <p class="hint">从 <a id="s-token-help" href="https://canvas.cityu.edu.hk/profile/settings" target="_blank" rel="noopener noreferrer">Canvas 账户 → 设置 → 新访问令牌</a> 获取，填写用途及学校要求的到期日，按只显示一次处理：生成后立即复制并返回这里，丢失时创建 / 再生。具体能否重看以学校界面为准。看不到创建按钮请联系学校；令牌本身不保证只读。</p>
       <div class="frow"><label></label><button class="btn primary" id="s-fetch">连接并生成看板</button></div>
       <details class="faq" id="s-advanced"><summary>其他学校 / 到期日 / 连接检查</summary>
         <div class="frow"><label for="s-canvas">Canvas 地址</label><input id="s-canvas" type="url" spellcheck="false" placeholder="https://canvas.cityu.edu.hk"></div>
         <div class="frow"><label for="s-exp">令牌到期日</label><input id="s-exp" type="date"></div>
-        <p class="hint">默认香港城市大学。到期日选填；只填学校站点地址，不附带页面路径。</p>
+        <p class="hint">默认香港城市大学。这里的到期日是选填提醒，不会更改学校令牌期限；学校生成页可能要求填写。只填学校 HTTPS 域名，不附带页面路径。</p>
         <button class="btn" id="s-test">仅检查连接</button>
       </details>
     ${HUB_MANAGED_ORIGIN ? "</section>" : "</details>"}
@@ -473,14 +513,38 @@ function showSetup() {
     <details class="faq"><summary>离线查看 / 旧版数据迁移</summary>
       <div class="bar"><button class="btn" id="s-dlsite">下载离线看板</button><button class="btn" id="s-backup">备份看板数据</button>
         <button class="btn" id="s-import">导入历史数据</button><input id="s-import-file" type="file" accept=".json,application/json" hidden></div>
-      <p class="hint">换到自己的新网址时，在旧页面备份、到新页面导入。备份仅含课程数据与快照，不含令牌或 SendKey；导入会替换当前浏览器看板，建议先备份。</p>
+      <p class="hint">换网址、浏览器或设备时，先在旧页面备份，再导入。备份排除配置中的令牌、SendKey 和订阅密钥，但课程内容并未匿名化；导入会替换当前看板，建议先备份。离线 HTML 是导出时的快照，不会自动更新。</p>
     </details>
     <p class="hint">连接成功或抓取成功后才保存输入。普通看板的数据与令牌保存在当前浏览器。</p>
+    </div>
     <div class="setup-head" style="justify-content:space-between;margin-top:12px">
       <button class="btn" id="s-clear" style="color:#c0392b">清除本机数据</button><button class="btn" id="s-close2">关闭</button>
     </div>
   </div>`;
   document.body.appendChild(ov);
+
+  $("s-agent-prompt").value = AGENT_SETUP_PROMPT;
+  const chooseRoute = (agent) => {
+    $("s-agent-panel").hidden = !agent;
+    $("s-web-panel").hidden = agent;
+    $("s-agent-entry").className = agent ? "btn primary" : "btn";
+    $("s-web-entry").className = agent ? "btn" : "btn primary";
+    $("s-agent-entry").setAttribute("aria-expanded", String(agent));
+    $("s-web-entry").setAttribute("aria-expanded", String(!agent));
+  };
+  $("s-agent-entry").onclick = () => chooseRoute(true);
+  $("s-web-entry").onclick = () => chooseRoute(false);
+  $("s-agent-copy").onclick = async () => {
+    try {
+      await navigator.clipboard.writeText(AGENT_SETUP_PROMPT);
+      $("s-agent-status").textContent = "已复制提示词，不含你的配置或 Token。";
+    } catch (e) {
+      $("s-agent-copy-details").open = true;
+      $("s-agent-prompt").focus();
+      $("s-agent-prompt").select();
+      $("s-agent-status").textContent = "复制失败：浏览器未允许访问剪贴板。请在下方手动全选复制提示词。";
+    }
+  };
 
   $("s-worker").value = cfg.worker;
   $("s-canvas").value = cfg.canvasUrl;
@@ -513,7 +577,8 @@ function showSetup() {
     const { response, body } = result;
     let info;
     try { info = JSON.parse(body); } catch (e) { /* 下面提供统一提示 */ }
-    if (!response.ok || !info || info.name !== "canvas-weekly-hub proxy" || info.ok !== true)
+    if (!response.ok) throw new Error("小助手服务返回 HTTP " + response.status + "：先检查 Cloudflare 部署、访问保护或服务状态；尚未验证 Canvas 令牌");
+    if (!info || info.name !== "canvas-weekly-hub proxy" || info.ok !== true)
       throw new Error("小助手代码不正确：请在 Cloudflare 全选替换为本项目 Worker 代码并 Deploy");
     showCapabilities(info);
     return info;
@@ -530,7 +595,7 @@ function showSetup() {
         const me = await workerApi("users/self", {}, c);
         if (!me || !me.id) throw new Error("Canvas 返回的用户信息不完整，本次配置未保存");
         saveSetup(c);
-        status("✅ 连接成功，配置已保存：" + (me.name || me.short_name || "已认证"), S_OK);
+        status("✅ 身份验证成功，配置已保存：" + (me.name || me.short_name || "已认证") + "。课程尚未读取，请点击“连接并生成看板”验证课程权限。", S_OK);
       });
     } catch (e) { status("❌ " + e.message, S_WARN); }
   };

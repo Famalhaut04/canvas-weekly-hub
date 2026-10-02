@@ -1,0 +1,13 @@
+PASS desktop {"viewport":1440,"scroll":1440,"client":1440,"left":340,"right":1100,"closeRight":1077}
+PASS agent public_desktop: Enter/Space routes, credential-free clipboard, denied-copy selection, school help, no overflow
+PASS mobile {"viewport":390,"scroll":390,"client":390,"left":8,"right":382,"closeRight":369}
+PASS agent public_mobile: Enter/Space routes, credential-free clipboard, denied-copy selection, school help, no overflow
+PASS browser invalid configuration feedback; no token saved
+PASS integrated desktop {"scroll":1440,"width":1440,"workerHidden":true,"tokenVisible":true,"advancedClosed":true,"hasCloudSetup":false,"managed":"http://127.0.0.1:62110"}
+PASS agent integrated_desktop: Enter/Space routes, credential-free clipboard, denied-copy selection, school help, no overflow
+PASS integrated mobile {"scroll":390,"width":390,"workerHidden":true,"tokenVisible":true,"advancedClosed":true,"hasCloudSetup":false,"managed":"http://127.0.0.1:62110"}
+PASS agent integrated_mobile: Enter/Space routes, credential-free clipboard, denied-copy selection, school help, no overflow
+PASS single-click connection, own-origin proxy, board rendering, credential-free backup
+PASS offline HTML export from own Worker without configuration credentials
+PASS reload restores local history
+PASS system overview on mobile

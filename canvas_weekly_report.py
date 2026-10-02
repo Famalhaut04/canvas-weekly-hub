@@ -15,7 +15,7 @@
   3. 在 reports/ 目录生成 markdown 周报（canvas周报_日期.md）
   4. 将本周数据合并进学习网站仓库的 data.json，并 git commit + push
 
-安全约定：canvas_config.json 含个人 Token，已被 .gitignore 排除，永远不会进入任何仓库。
+安全约定：canvas_config.json 含个人 Token，默认由 .gitignore 排除；已跟踪或强制添加的文件仍可能提交，提交前须检查。
 
 仅依赖 Python 标准库。token 未配置时生成提示报告并正常退出（退出码 2）。
 """
@@ -800,7 +800,7 @@ def main():
         msg = ("canvas_config.json 中的 access_token 为空。"
                "请按项目文档（docs/部署指南.md）的步骤，从 Canvas"
                "「账户→设置→+ New Access Token」生成令牌并填入配置文件后重试。"
-               "该文件已被 .gitignore 排除，Token 不会被提交到任何仓库。")
+               "该文件默认被 .gitignore 排除；已跟踪或强制添加时仍可能提交，请勿上传凭证。")
         REPORT_DIR.mkdir(parents=True, exist_ok=True)
         path = REPORT_DIR / f"canvas周报_{datetime.now(HK_TZ):%Y-%m-%d}.md"
         path.write_text(f"# Canvas 每周课程动态周报\n\n> ⚠️ 未获取数据：{msg}\n", encoding="utf-8")
@@ -835,7 +835,7 @@ def main():
     print(f"看板状态：{res['site_status']}；本地看板：运行 python serve_board.py")
     gh = cfg.get("github") or {}
     if gh.get("username") and gh.get("repo_name"):
-        print(f"云端备份仓库：https://github.com/{gh['username']}/{gh['repo_name']}（私有）")
+        print(f"云端备份仓库：https://github.com/{gh['username']}/{gh['repo_name']}（未验证可见性，请自行确认是私有仓库）")
 
 
 if __name__ == "__main__":

@@ -7,7 +7,7 @@ const { spawn } = require("node:child_process");
 const assert = require("node:assert/strict");
 
 const ROOT = path.resolve(__dirname, "..");
-const ARTIFACTS = path.join(__dirname, "artifacts");
+const ARTIFACTS = path.join(__dirname, "artifacts", "1002_配置流程核对_v1");
 const EDGE = process.env.CANVAS_TEST_EDGE || "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe";
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -83,6 +83,51 @@ async function main() {
       if (result.exceptionDetails) throw new Error(JSON.stringify(result.exceptionDetails));
       return result.result.value;
     };
+    const checkAgent = async (label) => {
+      await evaluate("document.getElementById('s-agent-entry').focus()");
+      assert.equal(await evaluate("document.activeElement.id"), "s-agent-entry");
+      await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", text: "\r", unmodifiedText: "\r", windowsVirtualKeyCode: 13 });
+      await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+      const route = await evaluate(`(() => ({ agent: !document.getElementById('s-agent-panel').hidden,
+        web: document.getElementById('s-web-panel').hidden,
+        expanded: document.getElementById('s-agent-entry').getAttribute('aria-expanded'),
+        fits: document.getElementById('setup-overlay').scrollWidth <= innerWidth + 1 }))()`);
+      assert.deepEqual(route, { agent: true, web: true, expanded: "true", fits: true });
+      const copied = await evaluate(`(async () => {
+        document.getElementById('s-token').value = 'clipboard-fixture-token';
+        Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (text) => { window.__copiedPrompt = text; } } });
+        await document.getElementById('s-agent-copy').onclick();
+        return { text: window.__copiedPrompt, message: document.getElementById('s-agent-status').textContent };
+      })()`);
+      assert.ok(!copied.text.includes("clipboard-fixture-token"));
+      assert.match(copied.text, /--check-config/); assert.match(copied.message, /已复制/);
+      const fallback = await evaluate(`(async () => {
+        Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async () => { throw new Error('denied'); } } });
+        await document.getElementById('s-agent-copy').onclick();
+        const input = document.getElementById('s-agent-prompt');
+        return { open: document.getElementById('s-agent-copy-details').open, focused: document.activeElement === input,
+          selected: input.selectionStart === 0 && input.selectionEnd === input.value.length,
+          message: document.getElementById('s-agent-status').textContent,
+          fits: document.getElementById('setup-overlay').scrollWidth <= innerWidth + 1 };
+      })()`);
+      assert.equal(fallback.open, true); assert.equal(fallback.focused, true);
+      assert.equal(fallback.selected, true); assert.equal(fallback.fits, true); assert.match(fallback.message, /复制失败.*手动/);
+      await evaluate("document.getElementById('s-agent-entry').scrollIntoView({block:'start'})");
+      const shot = await send("Page.captureScreenshot", { format: "png", captureBeyondViewport: false });
+      fs.writeFileSync(path.join(ARTIFACTS, "1002_agent_" + label + "_v1.png"), Buffer.from(shot.data, "base64"));
+      await evaluate("document.getElementById('s-web-entry').focus()");
+      await send("Input.dispatchKeyEvent", { type: "keyDown", key: " ", code: "Space", text: " ", unmodifiedText: " ", windowsVirtualKeyCode: 32 });
+      await send("Input.dispatchKeyEvent", { type: "keyUp", key: " ", code: "Space", windowsVirtualKeyCode: 32 });
+      assert.equal(await evaluate("!document.getElementById('s-web-panel').hidden && document.getElementById('s-agent-panel').hidden"), true);
+      const help = await evaluate(`(() => {
+        const input = document.getElementById('s-canvas'); input.value = 'https://other-canvas.example';
+        input.dispatchEvent(new Event('input')); const href = document.getElementById('s-token-help').href;
+        input.value = 'https://canvas.cityu.edu.hk'; input.dispatchEvent(new Event('input'));
+        document.getElementById('s-token').value = ''; return href;
+      })()`);
+      assert.equal(help, "https://other-canvas.example/profile/settings");
+      console.log("PASS agent " + label + ": Enter/Space routes, credential-free clipboard, denied-copy selection, school help, no overflow");
+    };
     await send("Page.enable");
     for (const mode of [{ name: "desktop", width: 1440, height: 1800, mobile: false },
       { name: "mobile", width: 390, height: 844, mobile: true }]) {
@@ -111,6 +156,7 @@ async function main() {
       const screenshot = await send("Page.captureScreenshot", { format: "png", captureBeyondViewport: false });
       fs.writeFileSync(path.join(ARTIFACTS, "1002_v2.2_public_" + mode.name + "_v1.png"), Buffer.from(screenshot.data, "base64"));
       console.log("PASS " + mode.name + " " + JSON.stringify(layout));
+      await checkAgent("public_" + mode.name);
     }
     const feedback = await evaluate(`(async () => {
       document.getElementById('s-worker').value = 'http://fixture.example';
@@ -149,6 +195,7 @@ async function main() {
       const shot = await send("Page.captureScreenshot", { format: "png", captureBeyondViewport: false });
       fs.writeFileSync(path.join(ARTIFACTS, "1002_v2.2_integrated_" + mode.name + "_v1.png"), Buffer.from(shot.data, "base64"));
       console.log("PASS integrated " + mode.name + " " + JSON.stringify(layout));
+      await checkAgent("integrated_" + mode.name);
     }
     const connected = await evaluate(`(async () => {
       document.getElementById("s-token").value = "fixture-token";

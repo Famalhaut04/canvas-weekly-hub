@@ -1,0 +1,53 @@
+{
+  "sources": [
+    {
+      "characters": 112324,
+      "cityu_login": true,
+      "sha256_utf8_lf": "46451405540d16fcf99899c0af1a1a95c26d795e2a8b86655d82cfc2e84cf100",
+      "http": 200,
+      "source": "main worker",
+      "agent_entry": false,
+      "url": "https://raw.githubusercontent.com/Famalhaut04/canvas-weekly-hub/main/worker.js"
+    },
+    {
+      "characters": 112324,
+      "cityu_login": true,
+      "sha256_utf8_lf": "46451405540d16fcf99899c0af1a1a95c26d795e2a8b86655d82cfc2e84cf100",
+      "http": 200,
+      "source": "Pages worker",
+      "agent_entry": false,
+      "url": "https://famalhaut04.github.io/canvas-weekly-hub/worker.js"
+    },
+    {
+      "characters": 68463,
+      "cityu_login": true,
+      "sha256_utf8_lf": "0484f62eb8b8fd613b543cbcae1975151dbb11f9672f58748653cd3763b816c9",
+      "http": 200,
+      "source": "Pages web",
+      "agent_entry": false,
+      "url": "https://famalhaut04.github.io/canvas-weekly-hub/web/"
+    },
+    {
+      "characters": 112095,
+      "cityu_login": false,
+      "sha256_utf8_lf": "18717bfb60341eda8fccf83b6af372a528f382f111512a6ac344da817ce647d9",
+      "http": 200,
+      "source": "Release attachment",
+      "agent_entry": false,
+      "url": "https://github.com/Famalhaut04/canvas-weekly-hub/releases/download/v2.2/worker.js"
+    }
+  ],
+  "main_commit": "0308b2047486e1c84e9dfe226547a610d41a7b66",
+  "release_assets": [
+    {
+      "name": "worker.js",
+      "size": 122301,
+      "digest": "sha256:9ffc39281440b1d014ab9f959b45483c30a1f3379583f0379a743824c4eec81d",
+      "browser_download_url": "https://github.com/Famalhaut04/canvas-weekly-hub/releases/download/v2.2/worker.js"
+    }
+  ],
+  "checked_utc": "2026-10-02T09:31:59.2926985Z",
+  "release_body": "# v2.2 · 部署一次，填令牌即用\n\n- **配置更简单**：网页和代理统一部署到自己的 Cloudflare Worker；打开自己的网址，只填令牌即可生成看板。支持一键部署或仅邮箱复制代码，不需要 agent。\n- **体验更顺手**：连接与生成合并，其他学校和到期日按需展开；增加历史备份 / 导入，修复手机设置窗口溢出。\n- **失败有保护**：显示进度与错误原因；作业查询失败不覆盖旧快照，部分内容失败明确提示。\n- **隐私更明确**：数据不经过作者服务器；代理只开放课程查询，敏感响应不缓存。备份不含配置凭证。\n- **功能做减法**：暂停云端订阅和微信提醒，不需要 KV、Cron 或 SendKey；保留本地日历下载、离线看板及 Python / agent 入口。\n\n**系统怎么工作**：浏览器经自己的 Worker 查询学校 Canvas，浏览器整理动态、比较快照，生成看板并保存到本机。Worker 提供网页与代理；Canvas 提供数据；浏览器负责处理和存储。\n\n[系统概述与各部分功能](https://famalhaut04.github.io/canvas-weekly-hub/web/overview.html) · [开始使用](https://famalhaut04.github.io/canvas-weekly-hub/web/)\n\n旧用户需更新自己的 Worker；迁移前先备份历史，导入后重新填写令牌。以前启用订阅的用户请按 [升级教程](https://github.com/Famalhaut04/canvas-weekly-hub/blob/main/docs/Cloudflare%E9%83%A8%E7%BD%B2%E5%9B%BE%E6%96%87%E6%95%99%E7%A8%8B.md) 停用旧订阅与定时器。\n",
+  "release_published": "2026-10-02T08:41:39Z",
+  "release_url": "https://github.com/Famalhaut04/canvas-weekly-hub/releases/tag/v2.2"
+}

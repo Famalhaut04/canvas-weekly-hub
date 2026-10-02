@@ -50,6 +50,11 @@ OVERLAY_CSS = """
   #setup-overlay .btn.primary { background: var(--brand); color: #fff; border-color: var(--brand); font-weight: 600; }
   #setup-overlay .btn:hover { filter: brightness(1.08); }
   #setup-overlay .btn:disabled { opacity: .65; cursor: wait; }
+  #setup-overlay .btn { max-width: 100%; white-space: normal; }
+  #setup-overlay .agent-code { white-space: pre-wrap; overflow-wrap: anywhere; font-size: .8rem; }
+  #setup-overlay textarea { display: block; box-sizing: border-box; width: 100%; min-width: 0;
+    margin-top: 8px; padding: 8px; border: 1px solid var(--line); border-radius: 8px;
+    background: var(--panel-2); color: var(--ink); font: inherit; font-size: .8rem; }
   #setup-overlay .status { font-size: .85rem; margin-top: 8px; white-space: pre-wrap; min-height: 1.2em; }
   #setup-overlay a { color: var(--brand-2); }
   .subbox { background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px;

@@ -33,7 +33,9 @@ function harness(seed = {}, route = async () => new Response("[]"), options = {}
     addEventListener(type, fn) { this[type] = fn; }
     dispatchEvent(event) { if (this[event.type]) this[event.type](event); }
     removeAttribute() {}
-    setAttribute() {}
+    setAttribute(key, value) { this[key] = value; }
+    focus() { this.focused = true; }
+    select() { this.selected = true; }
   }
   for (const id of ["settings-btn", "ics-link", "star-count"]) nodes.set(id, new Element());
   const storage = {
@@ -76,6 +78,59 @@ function saved(c = cfg) {
   return { hubWorker: c.worker, hubCanvasUrl: c.canvasUrl, hubToken: c.token,
     hubExpires: c.expires, hubSendKey: c.sendkey };
 }
+
+test("agent 路线切换不验证或保存 Token，返回网页保留草稿", () => {
+  const h = harness(); h.form();
+  h.nodes.get("s-agent-entry").onclick();
+  assert.equal(h.nodes.get("s-web-panel").hidden, true);
+  assert.equal(h.nodes.get("s-agent-entry")["aria-expanded"], "true");
+  assert.equal(h.values.get("hubToken"), undefined);
+  h.nodes.get("s-web-entry").onclick();
+  assert.equal(h.nodes.get("s-agent-panel").hidden, true);
+  assert.equal(h.nodes.get("s-token").value, cfg.token);
+  assert.equal(h.calls.length, 0);
+});
+
+test("复制 agent 提示词不包含填写的凭证，也不发起网络请求", async () => {
+  const h = harness(); h.form(); let copied;
+  h.context.navigator.clipboard = { writeText: async (text) => { copied = text; } };
+  await h.nodes.get("s-agent-copy").onclick();
+  assert.ok(!copied.includes(cfg.token));
+  assert.match(copied, /github.push_enabled=false/);
+  assert.match(copied, /--check-config/);
+  assert.match(copied, /云端 agent/);
+  assert.match(copied, /安装软件或依赖前征求同意/);
+  assert.equal(h.calls.length, 0);
+  assert.equal(h.values.get("hubToken"), undefined);
+});
+
+test("剪贴板拒绝时展开提示词并聚焦选择，不丢失草稿", async () => {
+  const h = harness(); h.form();
+  h.context.navigator.clipboard = { writeText: async () => { throw new Error("denied"); } };
+  await h.nodes.get("s-agent-copy").onclick();
+  assert.equal(h.nodes.get("s-agent-copy-details").open, true);
+  assert.equal(h.nodes.get("s-agent-prompt").focused, true);
+  assert.equal(h.nodes.get("s-agent-prompt").selected, true);
+  assert.match(h.nodes.get("s-agent-status").textContent, /复制失败.*手动/);
+  assert.equal(h.nodes.get("s-token").value, cfg.token);
+});
+
+test("Worker 服务错误先处理部署问题，不误报学校 Token 无效", async () => {
+  const h = harness(saved(), async () => response({ error: "service failure" }, 503), { health: true });
+  h.form({ ...cfg, token: "new-fixture-token" });
+  await h.nodes.get("s-test").onclick();
+  assert.match(h.nodes.get("s-status").textContent, /小助手服务返回 HTTP 503.*尚未验证 Canvas 令牌/);
+  assert.equal(h.values.get("hubToken"), cfg.token);
+  assert.ok(!h.calls.some((call) => call.url.includes("/proxy/")));
+});
+
+test("身份检查成功明确未验证课程读取", async () => {
+  const h = harness({}, async (url) => url.endsWith("/health") ? response(info) : response({ id: 1 }), { health: true });
+  h.form(); await h.nodes.get("s-test").onclick();
+  assert.match(h.nodes.get("s-status").textContent, /身份验证成功.*课程尚未读取/);
+  assert.equal(h.calls.length, 2);
+  assert.ok(!h.calls.some((call) => call.url.includes("courses")));
+});
 
 test("HTTPS 自定义域名可用，拒绝路径、账号和非 HTTPS", () => {
   const { api } = harness();
