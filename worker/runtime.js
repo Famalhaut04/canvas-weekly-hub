@@ -3,7 +3,7 @@
  * 修改后运行 python web/build_web.py，部署生成的 worker.js。
  */
 const CANVAS_HOST_DEFAULT = "canvas.cityu.edu.hk";
-// Instructure/学校边缘防护会拦截"非浏览器"特征请求（403），带上常规浏览器 UA 可显著降低被拦概率
+// 保留兼容 UA；403 仍需按响应区分学校权限与防护页，不绕过学校权限。
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
   "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
 
@@ -11,6 +11,7 @@ const CORS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, X-Canvas-Token, X-Canvas-Host",
+  "Access-Control-Expose-Headers": "Link, X-Canvas-Pagination",
   "Access-Control-Max-Age": "86400",
 };
 
@@ -54,7 +55,7 @@ function canvasToken(value) {
   return token;
 }
 
-const READ_PATH = /^(?:users\/self|courses|courses\/\d+\/(?:assignments|files|announcements))$/;
+const READ_PATH = /^(?:users\/self|courses|announcements|courses\/\d+\/(?:assignments|files))(?:\.json)?$/;
 
 async function handleProxy(request, env) {
   const url = new URL(request.url);
@@ -63,6 +64,13 @@ async function handleProxy(request, env) {
   const token = request.headers.get("X-Canvas-Token") || "";
   const host = request.headers.get("X-Canvas-Host") || env.CANVAS_HOST || CANVAS_HOST_DEFAULT;
   if (!READ_PATH.test(path)) return json({ error: "仅支持课程相关查询接口" }, 400);
+  if ([...url.searchParams.keys()].some((k) => /^(?:access_token|token|authorization)$/i.test(k)))
+    return json({ error: "凭证只能通过请求头传递" }, 400);
+  if (path.replace(/\.json$/, "") === "announcements") {
+    const contexts = url.searchParams.getAll("context_codes[]");
+    if (contexts.length !== 1 || !/^course_\d+$/.test(contexts[0]))
+      return json({ error: "公告查询必须指定一个课程，以隔离课程权限失败" }, 400);
+  }
   let safeHost, safeToken;
   try { safeHost = canvasHost(host); safeToken = canvasToken(token); }
   catch (e) { return json({ error: e.message }, 400); }
@@ -75,7 +83,9 @@ async function handleProxy(request, env) {
   if (r.status >= 300 && r.status < 400) return json({ error: "Canvas 返回重定向，未向其他地址传递令牌；请核对学校地址" }, 502);
   return new Response(r.body, {
     status: r.status,
-    headers: { "Content-Type": r.headers.get("Content-Type") || "application/json; charset=utf-8", "Cache-Control": "no-store", ...CORS },
+    headers: { "Content-Type": r.headers.get("Content-Type") || "application/json; charset=utf-8",
+      "Cache-Control": "no-store", "X-Canvas-Pagination": "link",
+      ...(r.headers.has("Link") ? { Link: r.headers.get("Link") } : {}), ...CORS },
   });
 }
 

@@ -1,0 +1,18 @@
+git diff --check exit: 0
+warning: in the working copy of 'canvas_weekly_report.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'docs/系统概述.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'docs/网页版使用指南.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'docs/部署指南.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'site-template/index.html', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'tests/1002_v2.2浏览器验收_v1.cjs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'tests/1002_web配置回归_v1.cjs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'tests/1002_本地配置回归_v1.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'web/overrides.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'web/overview.html', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'worker/runtime.js', LF will be replaced by CRLF the next time Git touches it
+b986178
+Staged files: 0
+Temporary test directories: 0
+site-template/index.html:264:const subChip = a => a.submission_status === "excused"
+canvas_weekly_report.py:385:def submission_state(a):
+web/overrides.js:375:function submissionState(a) {

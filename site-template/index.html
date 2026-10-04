@@ -45,6 +45,12 @@
   .icon-btn { background: rgba(255,255,255,.16); border: 1px solid rgba(255,255,255,.25);
               color: #fff; border-radius: 999px; width: 34px; height: 34px; line-height: 1; }
   .icon-btn:hover { background: rgba(255,255,255,.28); }
+  .read-note { font-size: .82rem; color: var(--muted); margin: 5px 0 10px; overflow-wrap: anywhere; }
+  .read-warning { color: var(--soon); }
+  .read-errors { margin-top: 10px; font-size: .85rem; overflow-wrap: anywhere; }
+  .read-errors summary { cursor: pointer; font-weight: 600; }
+  .read-errors p { margin: 6px 0; }
+  .read-errors ul { padding-left: 20px; }
   .icon-btn.refresh-action { width: auto; padding: 0 12px; flex-shrink: 0; font-size: .85rem; }
   button:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
   .meta { max-width: 1060px; margin: 0 auto; padding: 0 18px 12px; font-size: .8rem;
@@ -250,14 +256,19 @@ function due(iso, text) {
 const size = b => !b ? "" : b < 1024 ? b + " B"
   : b < 1048576 ? (b / 1024).toFixed(0) + " KB" : (b / 1048576).toFixed(1) + " MB";
 const fileWhen = f => f.is_update ? (f.updated_at || f.created_at) : f.created_at;
-const active = c => !!(c.new_assignments.length || c.upcoming.length || c.new_files.length || c.announcements.length);
+const active = c => !!(c.new_assignments.length || c.upcoming.length || c.new_files.length || c.announcements.length ||
+  (c.changes || []).length || Object.values(c.read_status || {}).some(s => s.state !== "ok"));
 const score = c => c.new_assignments.length * 3 + c.upcoming.length * 3 + c.new_files.length + c.announcements.length;
 
 /* ================= 渲染片段 ================= */
-const subChip = a => a.graded
+const subChip = a => a.submission_status === "excused"
+  ? `<span class="pill sub-ok">已豁免</span>`
+  : a.submission_status === "resubmit" ? `<span class="pill sub-no">需重新提交</span>`
+  : a.graded
   ? `<span class="pill sub-ok">已评分 ${esc(a.score ?? "-")}</span>`
   : a.submitted === true ? `<span class="pill sub-ok">已提交</span>`
-  : a.submitted === false ? `<span class="pill sub-no">未提交</span>` : "";
+  : a.submitted === false ? `<span class="pill sub-no">未提交</span>`
+  : `<span class="pill" title="Canvas 未提供可确认的提交状态；请打开作业，在 Canvas 或提交平台核对。此项不计为未提交。">状态待核验</span>`;
 
 function assignRow(a, showStatus) {
   const d = due(a.due_iso, a.due_at);
@@ -288,6 +299,54 @@ function fileCard(f, course) {
   </a>`;
 }
 
+const READ_LABELS = { permission_denied: "Canvas 权限拒绝", blocked: "HTML 防护页", access_denied: "访问被拒绝（原因待核验）",
+  auth_failed: "认证失败", not_found: "接口不存在 / 不可用", service_error: "服务异常", rate_limited: "请求受限",
+  incomplete: "结果不完整", pagination_unavailable: "需要更新个人 Worker", invalid_response: "响应格式异常", request_failed: "请求失败",
+  tls_setup_failed: "本机证书加载失败", tls_verify_failed: "HTTPS 证书验证失败", tls_handshake_failed: "HTTPS 安全连接失败" };
+const READ_ACTIONS = { permission_denied: "到学校课程页面核对文件或公告权限，不必反复换令牌。",
+  blocked: "核对学校网络访问限制；不能据此认定令牌过期。", access_denied: "在学校课程页面核对访问权限与限制，具体原因待确认。",
+  auth_failed: "到 Canvas 核对令牌是否有效或已过期。", not_found: "先更新项目代码，网页版还需更新个人 Worker；若仍发生，再核对学校接口支持。",
+  service_error: "检查学校服务状态；网页版同时检查自己的 Worker。", rate_limited: "减少刷新频率，待限制解除后再试。",
+  incomplete: "已停止不安全、循环或超出预算的分页，请在 Canvas 查看完整内容。",
+  pagination_unavailable: "部署最新版完整 worker.js 后再刷新。", invalid_response: "核对正在运行的项目代码与学校接口响应。",
+  request_failed: "检查网络和学校接口，本次未判定为令牌过期。",
+  tls_setup_failed: "检查本机 Python 证书环境，尚未验证令牌。",
+  tls_verify_failed: "核对学校证书、网络代理与本机信任链，保留证书验证。",
+  tls_handshake_failed: "检查 Python TLS 环境与网络，本次未判定为令牌过期。" };
+function readTime(value) {
+  if (/^\d{4}-\d\d-\d\dT.*(?:Z|[+-]\d\d:\d\d)$/.test(value || "")) {
+    const d = new Date(value);
+    if (!isNaN(d)) return d.toLocaleString("zh-CN", { hour12: false }) + "（设备时区）";
+  }
+  return value ? String(value) + "（旧记录）" : "未知";
+}
+function readNote(c, key) {
+  const s = (c.read_status || {})[key];
+  if (!s) return "";
+  const label = key === "files" ? "文件" : "公告";
+  if (s.state === "ok") return `<p class="read-note">${label}读取成功${s.coverage === "window" ? "，近期统计窗口已完整覆盖" : ""}。</p>`;
+  const reason = READ_LABELS[s.state] || READ_LABELS.request_failed;
+  return `<p class="read-note read-warning">${label}：${esc(reason)}。${s.retained
+    ? "本次未更新，显示旧数据；上次成功读取：" + esc(readTime(s.data_updated_at))
+    : "本次未完整读取，不能判定没有内容；如有条目仅为已读取部分"}。</p>`;
+}
+function warningHtml(w) {
+  if (!Array.isArray(w.read_issues) || !w.read_issues.length)
+    return (w.warnings || []).length ? "<strong>⚠️ 旧记录包含读取警告，旧版错误正文不再展示。请使用更新代码重新核对。</strong>" : "";
+  const groups = new Map();
+  for (const issue of w.read_issues) {
+    const kind = Object.hasOwn(READ_LABELS, issue.kind) ? issue.kind : "request_failed";
+    if (!groups.has(kind)) groups.set(kind, []);
+    groups.get(kind).push(issue);
+  }
+  const cs = w.courses || [];
+  const ok = key => cs.filter(c => c.read_status && c.read_status[key] && c.read_status[key].state === "ok").length;
+  return `<strong>⚠️ 该记录部分更新：作业已读取；文件成功 ${ok("files")}/${cs.length} 门，公告成功 ${ok("announcements")}/${cs.length} 门。失败项未更新。</strong>
+    <p class="read-note">记录时间：${esc(readTime(w.generated_at_iso || w.generated_at))}</p>` +
+    [...groups].map(([kind, entries]) => `<details class="read-errors"><summary>${esc(READ_LABELS[kind])} · ${new Set(entries.map(x => x.course_id)).size} 门课程 / ${entries.length} 项内容</summary>
+      <p>${esc(READ_ACTIONS[kind])}</p><ul>${entries.map(x => `<li>${esc(x.course_name)}：${x.section === "files" ? "文件" : "公告"}${x.http_status ? "（HTTP " + esc(x.http_status) + "）" : ""}</li>`).join("")}</ul></details>`).join("");
+}
+
 function courseCard(c, open) {
   const block = [];
   if (c.changes && c.changes.length)
@@ -300,21 +359,25 @@ function courseCard(c, open) {
   if (c.upcoming.length)
     block.push(`<h4>⏰ 未来 7 天截止 <em>${c.upcoming.length}</em></h4>
       ${c.upcoming.map(a => assignRow(a, false)).join("")}`);
-  if (c.new_files.length)
+  if (c.new_files.length || (c.read_status || {}).files)
     block.push(`<h4>📂 新资料 <em>${c.new_files.length}</em></h4>
-      <div class="files">${c.new_files.map(f => fileCard(f, c)).join("")}</div>`);
-  if (c.announcements.length)
+      ${readNote(c, "files")}<div class="files">${c.new_files.map(f => fileCard(f, c)).join("")}</div>
+      ${!c.new_files.length && c.read_status.files.state === "ok" ? '<p class="read-note">本周没有新资料（读取成功）。</p>' : ""}`);
+  if (c.announcements.length || (c.read_status || {}).announcements)
     block.push(`<h4>📢 公告 <em>${c.announcements.length}</em></h4>
+      ${readNote(c, "announcements")}
       <ul class="ann">${c.announcements.map(a => `<li>
         ${a.url ? `<a href="${safeHref(a.url)}" target="_blank" rel="noopener">${esc(a.title)}</a>`
                 : `<strong>${esc(a.title)}</strong>`}
-        <span class="atext">（${esc(a.created_at)}）${esc(a.summary)}…</span></li>`).join("")}</ul>`);
+        <span class="atext">（${esc(a.created_at)}）${esc(a.summary)}…</span></li>`).join("")}</ul>
+      ${!c.announcements.length && c.read_status.announcements.state === "ok" ? '<p class="read-note">本周没有新公告（读取成功）。</p>' : ""}`);
 
   const badges = [];
   if (c.changes && c.changes.length) badges.push(`<span class="pill upd">${c.changes.length} 变化</span>`);
   if (c.new_assignments.length) badges.push(`<span class="pill new">${c.new_assignments.length} 新任务</span>`);
   if (c.upcoming.length) badges.push(`<span class="pill upd">${c.upcoming.length} 待办</span>`);
   if (c.new_files.length) badges.push(`<span class="pill">${c.new_files.length} 新资料</span>`);
+  if (Object.values(c.read_status || {}).some(s => s.state !== "ok")) badges.push('<span class="pill upd">部分未更新</span>');
 
   return `<details class="course" ${open ? "open" : ""}>
     <summary>
@@ -385,16 +448,17 @@ function render() {
     warning.setAttribute("role", "status");
     $("stats").before(warning);
   }
-  warning.style.display = w.warnings && w.warnings.length ? "" : "none";
-  warning.innerHTML = (w.warnings || []).length
-    ? "<strong>⚠️ 部分课程内容未能读取，可稍后刷新重试</strong><ul>" +
-      w.warnings.map((s) => "<li>" + esc(s) + "</li>").join("") + "</ul>" : "";
+  warning.innerHTML = warningHtml(w);
+  warning.style.display = warning.innerHTML ? "" : "none";
 
-  const cn = (k) => (w.courses || []).reduce((s, c) => s + c[k].length, 0);
+  const cn = (k) => (w.courses || []).reduce((s, c) => {
+    const state = (c.read_status || {})[k === "new_files" ? "files" : k];
+    return s + (state && state.state !== "ok" ? 0 : c[k].length);
+  }, 0);
   const todo = allTodo(w);
   const nums = [["课程", (w.courses || []).length, 0], ["新任务", cn("new_assignments"), 0],
-                ["待办", todo.length, todo.length ? 1 : 0], ["新资料", cn("new_files"), 0],
-                ["公告", cn("announcements"), 0]];
+                ["待办", todo.length, todo.length ? 1 : 0], ["新资料（已确认）", cn("new_files"), 0],
+                ["公告（已确认）", cn("announcements"), 0]];
   $("stats").innerHTML = nums.map(([label, n, hot]) =>
     `<div class="stat${hot ? " hot" : ""}"><b>${n}</b><span>${label}</span></div>`).join("");
 
@@ -581,7 +645,8 @@ if (window.__HUB_DATA__) {
       if (j.ok && j.data) {
         boot(j.data);
         const u = document.getElementById("updated");
-        if (u) u.textContent = "最近更新：" + (j.data.updated_at || "") + "（刚刚刷新）";
+        if (u) u.textContent = "最近更新：" + (j.data.updated_at || "") +
+          ((j.data.weeks[0] || {}).fetch_state === "partial" ? "（部分更新，详见分类提示）" : "（刷新完成）");
       } else {
         alert("刷新失败：" + (j.log || "未知错误，可在 ZCode 里运行 python canvas_weekly_report.py 排查"));
       }

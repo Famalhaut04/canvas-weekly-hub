@@ -1,0 +1,24 @@
+test_announcements_context_dates_posted_time_and_failure_isolation (__main__.DataStateTests) ... ok
+test_changed_token_does_not_reuse_old_sections_or_assignment_state (__main__.DataStateTests) ... ok
+test_html_challenge_with_http_200_is_not_api_success (__main__.DataStateTests) ... ok
+test_http_errors_classified_without_html_or_credentials (__main__.DataStateTests) ... ok
+test_old_content_retained_with_timestamp_not_counted_as_new (__main__.DataStateTests) ... ok
+test_output_failure_does_not_advance_assignment_snapshot (__main__.DataStateTests) ... ok
+test_required_failure_does_not_replace_previous_board_or_state (__main__.DataStateTests) ... ok
+test_success_empty_clears_old_data_and_is_not_permission_failure (__main__.DataStateTests) ... ok
+test_descending_files_stop_only_after_window_covered (__main__.PaginationTests) ... ok
+test_invalid_items_and_missing_file_dates_are_not_complete (__main__.PaginationTests) ... ok
+test_later_page_failure_keeps_known_items_without_success_claim (__main__.PaginationTests) ... ok
+test_link_attributes_and_malformed_header (__main__.PaginationTests) ... ok
+test_next_url_origin_path_credentials_context_and_dates_checked (__main__.PaginationTests) ... ok
+test_over_twenty_pages_is_explicitly_incomplete (__main__.PaginationTests) ... ok
+test_redirect_handler_does_not_forward_bearer (__main__.PaginationTests) ... ok
+test_repeated_url_and_body_stop (__main__.PaginationTests) ... ok
+test_shared_budget_is_not_window_success (__main__.PaginationTests) ... ok
+test_short_next_and_full_last_page (__main__.PaginationTests) ... ok
+test_unsorted_files_follow_next_and_complete (__main__.PaginationTests) ... ok
+
+----------------------------------------------------------------------
+Ran 19 tests in 0.080s
+
+OK

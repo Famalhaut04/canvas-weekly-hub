@@ -87,7 +87,7 @@ class ConfigTests(unittest.TestCase):
 
 class FetchTests(unittest.TestCase):
     def test_assignment_failure_does_not_save_snapshot(self):
-        def api(base, token, path, params=None):
+        def api(base, token, path, params=None, options=None):
             if path == "/courses":
                 return [{"id": 1, "name": "Fixture Course"}]
             if path.endswith("/assignments"):
@@ -95,6 +95,7 @@ class FetchTests(unittest.TestCase):
             return []
         with mock.patch.object(engine, "api_get_all", side_effect=api), \
                 mock.patch.object(engine, "load_last_state", return_value={}), \
+                mock.patch.object(engine, "load_previous_sections", return_value=[]), \
                 mock.patch.object(engine, "save_last_state") as save, \
                 mock.patch.object(engine, "update_site") as update:
             result = engine.run_once(fixture_config())
@@ -104,14 +105,15 @@ class FetchTests(unittest.TestCase):
         update.assert_not_called()
 
     def test_partial_failure_is_reported_in_markdown(self):
-        def api(base, token, path, params=None):
+        def api(base, token, path, params=None, options=None):
             if path == "/courses":
                 return [{"id": 1, "name": "Fixture Course"}]
             if path.endswith("/files"):
                 raise RuntimeError("fixture permission error")
             return []
         with mock.patch.object(engine, "api_get_all", side_effect=api), \
-                mock.patch.object(engine, "load_last_state", return_value={}):
+                mock.patch.object(engine, "load_last_state", return_value={}), \
+                mock.patch.object(engine, "load_previous_sections", return_value=[]):
             week, state, stats = engine.fetch_week_data(engine.validate_config(fixture_config()))
         self.assertEqual(len(week["warnings"]), 1)
         self.assertIn("课件未能读取", engine.render_markdown(week, stats=stats))
@@ -119,15 +121,17 @@ class FetchTests(unittest.TestCase):
     def test_paginated_list_cannot_silently_truncate(self):
         response = mock.MagicMock()
         response.__enter__.return_value.read.return_value = json.dumps([{"id": 1}] * 100).encode("utf-8")
-        with mock.patch.object(engine.urllib.request, "urlopen", return_value=response), \
+        response.__enter__.return_value.headers = {"Link": '<https://canvas.example/api/v1/courses?per_page=100&page=2>; rel="next"'}
+        with mock.patch.object(engine, "api_open", return_value=response), \
                 mock.patch.object(engine, "MAX_PAGES", 1):
-            with self.assertRaisesRegex(RuntimeError, "分页上限"):
+            with self.assertRaisesRegex(RuntimeError, "分页请求预算"):
                 engine.api_get_all("https://canvas.example", "fixture-token", "/courses")
 
     def test_invalid_list_is_rejected_but_file_metadata_still_works(self):
         response = mock.MagicMock()
         response.__enter__.return_value.read.return_value = b'{"id": 2, "url": "https://fixture.example/file"}'
-        with mock.patch.object(engine.urllib.request, "urlopen", return_value=response):
+        response.__enter__.return_value.headers = {}
+        with mock.patch.object(engine, "api_open", return_value=response):
             with self.assertRaisesRegex(RuntimeError, "列表格式异常"):
                 engine.api_get_all("https://canvas.example", "fixture-token", "/courses/1/assignments")
             metadata = engine.api_get_all("https://canvas.example", "fixture-token", "/courses/1/files/2")

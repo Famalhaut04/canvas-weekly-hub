@@ -1,0 +1,6 @@
+Default TLS context: SSL error (ASN1 / NOT_ENOUGH_DATA)
+Project TLS context: OK
+Hostname check: True
+CERT_REQUIRED: True
+No credentials supplied; personal Token remains untested
+Anonymous HTTP status: 401

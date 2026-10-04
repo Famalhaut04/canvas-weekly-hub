@@ -1,0 +1,18 @@
+PASS desktop {"viewport":1440,"scroll":1440,"client":1440,"left":340,"right":1100,"closeRight":1077}
+PASS agent public_desktop: Enter/Space routes, credential-free clipboard, denied-copy selection, school help, no overflow
+PASS mobile {"viewport":390,"scroll":390,"client":390,"left":8,"right":382,"closeRight":369}
+PASS agent public_mobile: Enter/Space routes, credential-free clipboard, denied-copy selection, school help, no overflow
+PASS browser invalid configuration feedback; no token saved
+PASS integrated desktop {"scroll":1425,"width":1425,"workerHidden":true,"tokenVisible":true,"advancedClosed":true,"hasCloudSetup":false,"managed":"http://127.0.0.1:49672"}
+PASS agent integrated_desktop: Enter/Space routes, credential-free clipboard, denied-copy selection, school help, no overflow
+PASS integrated mobile {"scroll":390,"width":390,"workerHidden":true,"tokenVisible":true,"advancedClosed":true,"hasCloudSetup":false,"managed":"http://127.0.0.1:49672"}
+PASS agent integrated_mobile: Enter/Space routes, credential-free clipboard, denied-copy selection, school help, no overflow
+PASS single-click connection, own-origin proxy, board rendering, credential-free backup
+PASS offline HTML export from own Worker without configuration credentials
+PASS reload restores local history
+PASS real browser 72h boundary, wake checks and reminder without Canvas requests
+PASS keyboard dismissal and mobile preferences; Token draft remains unsaved
+PASS two real tabs: one refresh performs exactly 4 fixture API calls; competing tab makes 0
+PASS #5 grouped warnings, keyboard expansion, partial status, old data and timestamp, no error HTML or credentials
+PASS #5 required request failure preserves board, assignment snapshot and successful timestamp
+PASS system overview on mobile

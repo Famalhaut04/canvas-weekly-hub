@@ -1,0 +1,15 @@
+test_api_opener_keeps_redirect_guard_and_verified_context (__main__.TlsContextTests) ... ok
+test_context_failure_classification_preserved_by_reader (__main__.TlsContextTests) ... ok
+test_download_reuses_verified_context_without_canvas_credentials (__main__.TlsContextTests) ... ok
+test_empty_or_unreadable_store_fails_closed (__main__.TlsContextTests) ... ok
+test_malformed_trusted_certificate_is_not_silently_skipped (__main__.TlsContextTests) ... ok
+test_non_windows_failure_does_not_attempt_windows_workaround (__main__.TlsContextTests) ... ok
+test_normal_default_context_preserved (__main__.TlsContextTests) ... ok
+test_pem_load_failure_is_safe_and_not_retried_unverified (__main__.TlsContextTests) ... ok
+test_verify_and_handshake_errors_distinct_from_token_failure (__main__.TlsContextTests) ... ok
+test_windows_der_failure_uses_same_trusted_certificates_as_pem (__main__.TlsContextTests) ... ok
+
+----------------------------------------------------------------------
+Ran 10 tests in 0.010s
+
+OK

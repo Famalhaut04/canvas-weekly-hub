@@ -7,7 +7,10 @@ const { spawn } = require("node:child_process");
 const assert = require("node:assert/strict");
 
 const ROOT = path.resolve(__dirname, "..");
-const ARTIFACTS = path.join(__dirname, "artifacts", "1002_手动刷新与更新提醒_v1");
+const artifactName = process.env.CANVAS_TEST_ARTIFACT_NAME || "1002_手动刷新与更新提醒_v1";
+assert.equal(path.basename(artifactName), artifactName, "产物目录必须是本项目 artifacts 中的一个子目录名");
+assert.ok(artifactName !== "." && artifactName !== "..", "禁止使用父目录作为产物目录");
+const ARTIFACTS = path.join(__dirname, "artifacts", artifactName);
 const EDGE = process.env.CANVAS_TEST_EDGE || "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe";
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -25,6 +28,8 @@ async function main() {
   const worker = (await import("data:text/javascript;base64," + Buffer.from(fs.readFileSync(path.join(ROOT, "worker.js"), "utf8")).toString("base64"))).default;
   const nativeFetch = global.fetch; const canvasCalls = [];
   let holdCourse = null;
+  let readingPhase = "healthy";
+  let submissionPhase = "unsubmitted";
   global.fetch = async (url, options) => {
     const target = new URL(url);
     if (target.hostname === "127.0.0.1") return nativeFetch(url, options);
@@ -32,13 +37,24 @@ async function main() {
     assert.equal(options.headers.Authorization, "Bearer fixture-token");
     canvasCalls.push(target.pathname);
     if (target.pathname.endsWith("/courses") && holdCourse) await holdCourse;
-    const now = new Date().toISOString();
+    const now = new Date(Date.now() - 60000).toISOString();
     let data = [];
     if (target.pathname.endsWith("/users/self")) data = { id: 1, name: "Fixture User" };
-    else if (target.pathname.endsWith("/courses")) data = [{ id: 1, name: "Fixture Course", course_code: "TEST1001" }];
+    else if (target.pathname.endsWith("/courses")) data = readingPhase === "healthy"
+      ? [{ id: 1, name: "Fixture Course", course_code: "TEST1001" }]
+      : [{ id: 1, name: "Fixture Course", course_code: "TEST1001" }, { id: 2, name: "Fixture Empty", course_code: "TEST1002" }];
     else if (target.pathname.endsWith("/assignments")) data = [{ id: 2, name: "Fixture Assignment", created_at: now, updated_at: now,
       due_at: new Date(Date.now() + 2 * 86400000).toISOString(), points_possible: 10, submission_types: ["online_upload"],
-      html_url: "https://canvas.example/courses/1/assignments/2", submission: { workflow_state: "unsubmitted" } }];
+      html_url: "https://canvas.example/courses/1/assignments/2", submission: submissionPhase === "unknown" ? undefined :
+        { workflow_state: submissionPhase, submitted_at: submissionPhase === "submitted" ? now : null } }];
+    else if (target.pathname.endsWith("/files") && target.pathname.includes("/courses/1/")) {
+      if (readingPhase !== "healthy") return new Response(JSON.stringify({ message: "user not authorized to perform that action" }), { status: 403, headers: { "Content-Type": "application/json" } });
+      data = [{ id: 5, display_name: "Fixture Old File.pdf", created_at: now, updated_at: now, size: 1000 }];
+    } else if (target.pathname.endsWith("/announcements") && target.searchParams.get("context_codes[]") === "course_1") {
+      if (readingPhase !== "healthy") return new Response('<html><script>window.unsafe="fixture-token"</script>404</html>', { status: 404, headers: { "Content-Type": "text/html" } });
+      data = [{ id: 6, title: "Fixture Old Announcement", posted_at: now, message: "Fixture safe text" }];
+    }
+    if (readingPhase === "critical" && target.pathname.endsWith("/assignments")) return new Response('{}', { status: 503, headers: { "Content-Type": "application/json" } });
     return new Response(JSON.stringify(data), { headers: { "Content-Type": "application/json" } });
   };
   const service = http.createServer(async (req, res) => {
@@ -315,6 +331,67 @@ async function main() {
     assert.equal(await evaluate("JSON.parse(localStorage.getItem('hubRefreshState')).successAt", secondSession), latest);
     await send('Target.closeTarget', { targetId: second.targetId });
     console.log('PASS two real tabs: one refresh performs exactly 4 fixture API calls; competing tab makes 0');
+
+    readingPhase = "partial";
+    const partial = await evaluate(`(async () => {
+      await document.getElementById('refresh-btn').onclick();
+      const data = JSON.parse(localStorage.getItem('hubData'));
+      const c = data.weeks[0].courses[0];
+      return { state: data.weeks[0].fetch_state, retained: c.read_status.files.retained,
+        updated: c.read_status.files.data_updated_at, name: c.new_files[0].name,
+        message: document.getElementById('refresh-message').textContent,
+        warning: document.getElementById('fetch-warnings').textContent,
+        text: document.body.innerText, details: document.querySelectorAll('#fetch-warnings details').length };
+    })()`);
+    assert.equal(partial.state, 'partial'); assert.equal(partial.retained, true);
+    assert.equal(partial.name, 'Fixture Old File.pdf'); assert.ok(partial.updated);
+    assert.match(partial.message, /部分更新已保存/); assert.match(partial.warning, /文件成功 1\/2/);
+    assert.equal(partial.details, 2); assert.match(partial.text, /本次未更新，显示旧数据/);
+    assert.ok(!partial.text.includes('window.unsafe') && !partial.text.includes('fixture-token'));
+    assert.ok(!partial.text.includes('可稍后刷新重试'));
+    await evaluate("document.querySelector('#fetch-warnings details summary').focus()");
+    await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', text: '\r', unmodifiedText: '\r', windowsVirtualKeyCode: 13 });
+    await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
+    assert.equal(await evaluate("document.querySelector('#fetch-warnings details').open"), true);
+    for (const mode of [{ name: 'desktop', width: 1440, height: 1000, mobile: false }, { name: 'mobile', width: 390, height: 844, mobile: true }]) {
+      await send('Emulation.setDeviceMetricsOverride', { width: mode.width, height: mode.height, deviceScaleFactor: 1, mobile: mode.mobile });
+      await evaluate('window.scrollTo(0, 0)');
+      assert.equal(await evaluate("document.documentElement.scrollWidth <= innerWidth + 1"), true);
+      const shot = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
+      fs.writeFileSync(path.join(ARTIFACTS, '1003_分类警告_' + mode.name + '_v1.png'), Buffer.from(shot.data, 'base64'));
+    }
+    await evaluate("document.querySelector('.course .body').scrollIntoView({block: 'start'})");
+    const retentionShot = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
+    fs.writeFileSync(path.join(ARTIFACTS, '1003_旧内容标记_mobile_v1.png'), Buffer.from(retentionShot.data, 'base64'));
+    console.log('PASS #5 grouped warnings, keyboard expansion, partial status, old data and timestamp, no error HTML or credentials');
+    submissionPhase = "unknown";
+    await evaluate("document.getElementById('refresh-btn').onclick()");
+    assert.equal(await evaluate("JSON.parse(localStorage.getItem('hubData')).weeks[0].courses[0].upcoming[0].submitted"), null);
+    for (const mode of [{ name: 'desktop', width: 1440, height: 1000, mobile: false }, { name: 'mobile', width: 390, height: 844, mobile: true }]) {
+      await send('Emulation.setDeviceMetricsOverride', { width: mode.width, height: mode.height, deviceScaleFactor: 1, mobile: mode.mobile });
+      assert.equal(await evaluate("Array.from(document.querySelectorAll('.pill')).some(el => el.textContent === '状态待核验')"), true);
+      assert.equal(await evaluate("Array.from(document.querySelectorAll('.pill')).some(el => el.textContent === '未提交')"), false);
+      assert.equal(await evaluate("document.documentElement.scrollWidth <= innerWidth + 1"), true);
+      await evaluate("document.getElementById('todo-panel').scrollIntoView({block: 'start'})");
+      const shot = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
+      fs.writeFileSync(path.join(ARTIFACTS, '1004_提交待核验_' + mode.name + '_v1.png'), Buffer.from(shot.data, 'base64'));
+    }
+    console.log('PASS missing submission displayed as pending verification on desktop and mobile');
+    submissionPhase = "submitted";
+    await evaluate("document.getElementById('refresh-btn').onclick()");
+    assert.equal(await evaluate("JSON.parse(localStorage.getItem('hubData')).weeks[0].courses[0].upcoming[0].submitted"), true);
+    assert.equal(await evaluate("Array.from(document.querySelectorAll('.pill')).some(el => el.textContent === '已提交')"), true);
+    assert.equal(await evaluate("Array.from(document.querySelectorAll('.pill')).some(el => el.textContent === '状态待核验')"), false);
+    console.log('PASS manual refresh reads newly submitted fixture and updates visible status');
+    readingPhase = "critical";
+    const failed = await evaluate(`(async () => {
+      const before = ['hubData', 'hubLastState', 'hubRefreshState'].map(k => localStorage.getItem(k));
+      await document.getElementById('refresh-btn').onclick();
+      return { same: JSON.stringify(before) === JSON.stringify(['hubData', 'hubLastState', 'hubRefreshState'].map(k => localStorage.getItem(k))),
+        message: document.getElementById('refresh-message').textContent, disabled: document.getElementById('refresh-btn').disabled };
+    })()`);
+    assert.equal(failed.same, true); assert.match(failed.message, /本次未更新.*503/); assert.equal(failed.disabled, false);
+    console.log('PASS #5 required request failure preserves board, assignment snapshot and successful timestamp');
 
     await send("Page.navigate", { url: origin + "/overview" }); await sleep(400);
     assert.equal(await evaluate("document.querySelectorAll('tbody tr').length"), 6);

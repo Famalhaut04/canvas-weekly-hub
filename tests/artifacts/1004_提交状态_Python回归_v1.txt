@@ -1,0 +1,8 @@
+test_fetch_includes_current_submission_and_refresh_replaces_status (__main__.SubmissionTests) ... ok
+test_labels_and_unknown_not_counted_as_unsubmitted (__main__.SubmissionTests) ... ok
+test_shared_status_matrix (__main__.SubmissionTests) ... ok
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.001s
+
+OK

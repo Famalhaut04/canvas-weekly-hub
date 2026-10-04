@@ -26,6 +26,7 @@ import json
 import os
 import re
 import shutil
+import ssl
 import subprocess
 import sys
 import urllib.error
@@ -170,10 +171,11 @@ def load_config():
 
 def parse_ts(s):
     """解析 Canvas 的 ISO8601 时间字符串为 aware datetime。"""
-    if not s:
+    if not isinstance(s, str):
         return None
     try:
-        return datetime.fromisoformat(s.replace("Z", "+00:00"))
+        stamp = datetime.fromisoformat(s.replace("Z", "+00:00").replace("z", "+00:00"))
+        return stamp if stamp.tzinfo is not None else None
     except ValueError:
         return None
 
@@ -182,48 +184,231 @@ def fmt_hk(dt):
     return dt.astimezone(HK_TZ).strftime("%Y-%m-%d %H:%M") if dt else "无截止时间"
 
 
-def api_get_all(base_url, token, path, params=None):
-    """GET Canvas API 并自动翻页，返回全部条目列表。"""
-    params = dict(params or {})
-    params.setdefault("per_page", PER_PAGE)
-    items = []
-    page = 1
-    while page <= MAX_PAGES:
-        qs = dict(params)
-        qs["page"] = page
-        url = f"{base_url.rstrip('/')}/api/v1{path}?" + urllib.parse.urlencode(qs, doseq=True)
-        req = urllib.request.Request(url, headers={
-            "Authorization": f"Bearer {token}",
-            "Accept": "application/json",
-        })
+READ_REASONS = {
+    "permission_denied": "Canvas 权限拒绝，该课程列表不可访问；请在学校课程页面核对权限，不必反复换令牌",
+    "blocked": "收到 HTML 防护页，请检查学校的网络访问限制",
+    "access_denied": "访问被拒绝，具体权限或访问限制原因尚未确认",
+    "auth_failed": "认证失败，请核对令牌是否有效或已过期",
+    "not_found": "接口返回 404，请核对学校接口支持",
+    "service_error": "服务异常，请检查学校服务状态",
+    "rate_limited": "请求受限，请减少刷新频率后再试",
+    "incomplete": "结果不完整，已停止分页；不能据此判断没有资料",
+    "request_failed": "请求失败，请检查网络与学校接口；未判定为令牌过期",
+    "invalid_response": "响应格式不正确，请检查学校接口",
+    "tls_setup_failed": "本机 HTTPS 证书加载失败，请检查 Python 证书环境；尚未验证令牌",
+    "tls_verify_failed": "HTTPS 证书验证失败，请核对学校证书、网络代理与本机信任链；不要关闭证书验证",
+    "tls_handshake_failed": "HTTPS 安全连接未完成，请检查 Python TLS 环境与网络；未判定为令牌过期",
+}
+
+
+class CanvasReadError(RuntimeError):
+    def __init__(self, kind, message=None, http_status=None, items=None):
+        super().__init__(message or READ_REASONS.get(kind, READ_REASONS["request_failed"]))
+        self.kind = kind
+        self.http_status = http_status
+        self.items = items or []
+
+
+class ReadItems(list):
+    coverage = "all"
+
+
+class NoApiRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None  # 不把 API 的 Bearer 凭证带到重定向地址。
+
+
+def api_tls_context():
+    """保留 TLS 验证，兼容 Windows 证书批量 DER 加载失败。"""
+    try:
+        return ssl.create_default_context()
+    except (ssl.SSLError, OSError) as error:
+        if sys.platform != "win32":
+            raise CanvasReadError("tls_setup_failed") from error
         try:
-            with urllib.request.urlopen(req, timeout=60) as resp:
-                batch = json.loads(resp.read().decode("utf-8"))
+            # 与 Python 默认 Windows 信任筛选相同，只改变加载编码。
+            # 不新增可信根、不跳过解析失败的证书、不改系统证书或环境变量。
+            certs = []
+            for store in ("CA", "ROOT"):
+                for cert, encoding, trust in ssl.enum_certificates(store):
+                    if encoding == "x509_asn" and (trust is True or ssl.Purpose.SERVER_AUTH.oid in trust):
+                        certs.append(ssl.DER_cert_to_PEM_cert(cert))
+            if not certs:
+                raise ValueError("no server-auth certificates")
+            context = ssl.create_default_context(cadata="".join(certs))
+            context.set_default_verify_paths()
+            return context
+        except (OSError, ValueError, TypeError) as fallback_error:
+            raise CanvasReadError("tls_setup_failed") from fallback_error
+
+
+def api_open(request, timeout):
+    context = api_tls_context()
+    return urllib.request.build_opener(NoApiRedirect(), urllib.request.HTTPSHandler(context=context)).open(request, timeout=timeout)
+
+
+def next_link(link):
+    if not link:
+        return None
+    next_urls = []
+    for part in re.split(r",\s*(?=<)", link):
+        entry = re.fullmatch(r"\s*<([^<>]+)>\s*(;[^<>]*)?\s*", part)
+        rel = re.search(r';\s*rel\s*=\s*(?:"([^"]+)"|([^,;\s]+))', entry.group(2) or "", re.I) if entry else None
+        if not entry or not rel:
+            raise CanvasReadError("incomplete", "分页 Link 格式异常，结果不完整")
+        if "next" in (rel.group(1) or rel.group(2)).split():
+            next_urls.append(entry.group(1))
+    if len(next_urls) > 1:
+        raise CanvasReadError("incomplete", "分页 Link 格式异常，结果不完整")
+    return next_urls[0] if next_urls else None
+
+
+def safe_next_page(value, base_url, path, params):
+    try:
+        u = urllib.parse.urlsplit(value)
+        base = urllib.parse.urlsplit(base_url.rstrip("/"))
+        query = urllib.parse.parse_qs(u.query, keep_blank_values=True)
+        valid = (u.scheme == "https" and u.netloc.lower() == base.netloc.lower() and not u.username
+                 and not u.password and not u.fragment and re.sub(r"\.json$", "", u.path) == "/api/v1" + path)
+    except ValueError:
+        valid, query = False, {}
+    if not valid or any(k.lower() in {"access_token", "token", "authorization"} for k in query):
+        raise CanvasReadError("incomplete", "下一页地址未通过学校与接口校验，已停止请求")
+    for key in ["context_codes[]", "start_date", "end_date", "sort", "order", "order_by", "include[]", "enrollment_state"]:
+        if key in params:
+            expected = params[key] if isinstance(params[key], list) else [params[key]]
+            if sorted(map(str, expected)) != sorted(query.get(key, [])):
+                raise CanvasReadError("incomplete", "分页改变了课程或统计范围，已停止请求")
+    return value
+
+
+def api_get_all(base_url, token, path, params=None, options=None):
+    """按学校 Link 读取；预算用完报不完整，不猜测下一页，不泄露响应正文。"""
+    params = dict(params or {})
+    options = options or {}
+    params.setdefault("per_page", PER_PAGE)
+    url = base_url.rstrip("/") + "/api/v1" + path + "?" + urllib.parse.urlencode(dict(params, page=1), doseq=True)
+    safe_next_page(url, base_url, path, params)
+    items, seen_urls, seen_batches = ReadItems(), set(), set()
+    ordered, previous_time, missing_time = True, None, False
+    for page in range(MAX_PAGES):
+        budget = options.get("budget")
+        if budget is not None:
+            budget["remaining"] -= 1
+            if budget["remaining"] < 0:
+                raise CanvasReadError("incomplete", "本次查询请求预算已用完，结果不完整", items=items)
+        u = urllib.parse.urlsplit(url)
+        canonical = (u.path, tuple(sorted(urllib.parse.parse_qsl(u.query, keep_blank_values=True))))
+        if canonical in seen_urls:
+            raise CanvasReadError("incomplete", "分页循环，结果不完整", items=items)
+        seen_urls.add(canonical)
+        req = urllib.request.Request(url, headers={"Authorization": "Bearer " + token, "Accept": "application/json"})
+        try:
+            with api_open(req, timeout=60) as resp:
+                body = resp.read().decode("utf-8")
+                html = "text/html" in resp.headers.get("Content-Type", "").lower() or bool(re.match(r"\s*(?:<!doctype|<html)", body, re.I))
+                if html:
+                    kind = "blocked" if re.search(r"cloudflare|cf-chl|just a moment|attention required", body, re.I) else "invalid_response"
+                    raise CanvasReadError(kind, items=items)
+                batch = json.loads(body)
+                link = resp.headers.get("Link")
+        except CanvasReadError as e:
+            e.items = items
+            raise
         except urllib.error.HTTPError as e:
-            detail = e.read().decode("utf-8", "ignore")[:200]
-            raise RuntimeError(f"Canvas API {path} 返回 HTTP {e.code}：{detail}") from e
-        except urllib.error.URLError as e:
-            raise RuntimeError(f"无法连接 Canvas（{e.reason}）。请检查网络/校园网。") from e
-        except (ValueError, TimeoutError) as e:
-            raise RuntimeError("Canvas API %s 响应无效或请求超时，请稍后重试" % path) from e
+            body = e.read().decode("utf-8", "ignore")
+            html = "text/html" in (e.headers.get("Content-Type", "") if e.headers else "") or bool(re.match(r"\s*(?:<!doctype|<html)", body, re.I))
+            if e.code == 401:
+                kind = "auth_failed"
+            elif e.code == 403:
+                try:
+                    permission = bool(re.search(r"not authorized|permission|insufficient privileges", json.dumps(json.loads(body)), re.I))
+                except ValueError:
+                    permission = False
+                kind = ("blocked" if re.search(r"cloudflare|cf-chl|just a moment|attention required", body, re.I) else "access_denied") if html else "permission_denied" if permission else "access_denied"
+            else:
+                kind = "not_found" if e.code == 404 else "rate_limited" if e.code == 429 else "service_error" if e.code >= 500 else "request_failed"
+            raise CanvasReadError(kind, "HTTP %s：%s" % (e.code, READ_REASONS[kind]), e.code, items) from e
+        except (urllib.error.URLError, TimeoutError, OSError) as e:
+            cause = getattr(e, "reason", e)
+            kind = ("tls_verify_failed" if isinstance(cause, ssl.SSLCertVerificationError) else
+                    "tls_handshake_failed" if isinstance(cause, ssl.SSLError) else "request_failed")
+            raise CanvasReadError(kind, items=items) from e
+        except (ValueError, UnicodeError) as e:
+            raise CanvasReadError("invalid_response", items=items) from e
         if not isinstance(batch, list):
-            # 下载前取文件元数据的单对象接口，其余调用都应返回列表。
             if isinstance(batch, dict) and re.fullmatch(r"/courses/\d+/files/\d+", path):
-                return [batch]
-            raise RuntimeError("Canvas API %s 列表格式异常，本次抓取中止" % path)
+                return ReadItems([batch])
+            raise CanvasReadError("invalid_response", "Canvas 列表格式异常，本次抓取中止")
+        if any(not isinstance(x, dict) for x in batch):
+            raise CanvasReadError("invalid_response", "列表条目格式异常，本次数据未保存", items=items)
+        signature = json.dumps([x.get("id", x) if isinstance(x, dict) else x for x in batch], sort_keys=True)
+        if batch and signature in seen_batches:
+            raise CanvasReadError("incomplete", "返回重复页，结果不完整", items=items)
+        seen_batches.add(signature)
         items.extend(batch)
-        if len(batch) < int(params["per_page"]):
-            break
-        if page == MAX_PAGES:
-            raise RuntimeError("Canvas API %s 达到分页上限，本次抓取中止，避免保存不完整快照" % path)
-        page += 1
-    return items
+        covered = False
+        if options.get("window_start") and params.get("sort") == "created_at" and params.get("order") == "desc":
+            for item in batch:
+                stamp = parse_ts(item.get("created_at"))
+                if not stamp or (previous_time is not None and stamp > previous_time):
+                    ordered = False
+                if not stamp:
+                    missing_time = True
+                if stamp:
+                    previous_time = stamp
+            covered = bool(ordered and batch and previous_time < options["window_start"])
+        try:
+            next_url = next_link(link)
+            if next_url:
+                safe_next_page(next_url, base_url, path, params)
+        except CanvasReadError as e:
+            e.items = items
+            raise
+        if covered or not next_url:
+            if missing_time:
+                raise CanvasReadError("incomplete", "部分文件缺少有效创建时间，统计范围未能完整核对", items=items)
+            items.coverage = "window" if covered else "all"
+            return items
+        if page + 1 == MAX_PAGES:
+            raise CanvasReadError("incomplete", "已达到分页请求预算，结果不完整", items=items)
+        url = next_url
 
 
 def strip_html(html, limit=160):
-    text = re.sub(r"<[^>]+>", " ", html or "")
+    text = re.sub(r"<(script|style)\b[^>]*>[\s\S]*?</\1\s*>", " ", html or "", flags=re.I)
+    text = re.sub(r"<[^>]+>", " ", text)
     text = re.sub(r"&[a-z]+;|&#\d+;", " ", text)
     return re.sub(r"\s+", " ", text).strip()[:limit]
+
+
+def submission_state(a):
+    """仅据当前用户的提交记录判断；未知不能归入未提交。"""
+    sub = a.get("submission")
+    sub = sub if isinstance(sub, dict) else {}
+    wf = sub.get("workflow_state")
+    submitted = None
+    graded = False
+    status = "unknown"
+    if sub.get("excused") is True:
+        status = "excused"
+    elif sub.get("redo_request") is True:
+        status = "resubmit"
+    elif wf in ("submitted", "graded", "pending_review"):
+        submitted = True
+        graded = wf == "graded" and sub.get("grade_matches_current_submission") is not False
+        status = "graded" if graded else "submitted"
+    elif wf == "unsubmitted":
+        # 时间与状态矛盾，或外部/线下交付尚未确认，均不能断言未提交。
+        types = a.get("submission_types")
+        types = types if isinstance(types, list) else []
+        if not sub.get("submitted_at") and not any(t in types for t in ("external_tool", "on_paper", "none")):
+            submitted = False
+            status = "unsubmitted"
+    elif not wf and parse_ts(sub.get("submitted_at")):
+        submitted = True
+        status = "submitted"
+    return {"submitted": submitted, "graded": graded, "submission_status": status}
 
 
 def assign_kind(a):
@@ -277,7 +462,7 @@ def download_new_file(base, token, cid, fobj, dest_dir):
         if not url:
             return None, None
         req = urllib.request.Request(url)
-        with urllib.request.urlopen(req, timeout=180) as resp, open(dest, "wb") as out:
+        with urllib.request.urlopen(req, timeout=180, context=api_tls_context()) as resp, open(dest, "wb") as out:
             while True:
                 chunk = resp.read(65536)
                 if not chunk:
@@ -360,7 +545,13 @@ def fetch_week_data(cfg):
     upcoming_days = int(cfg.get("upcoming_days", 7))
     term_filter = (cfg.get("term_filter") or "").strip()
     prev_state = load_last_state()
-    new_state = {"assignments": {}}
+    binding = hashlib.sha256(json.dumps([base.rstrip("/"), token]).encode("utf-8")).hexdigest()
+    same_identity = not prev_state.get("reader_binding") or prev_state["reader_binding"] == binding
+    previous_weeks = load_previous_sections(cfg) if same_identity else []
+    if not same_identity:
+        prev_state = {}
+    new_state = {"assignments": {}, "reader_binding": binding}
+    budget = {"remaining": 200}
     stats = {"downloaded": 0, "skipped": 0, "failed": 0, "total": 0}
 
     now = datetime.now(timezone.utc)
@@ -370,32 +561,50 @@ def fetch_week_data(cfg):
     courses = api_get_all(base, token, "/courses", {
         "enrollment_state": "active",
         "include[]": ["term"],
-    })
+    }, {"budget": budget})
     if term_filter:
         courses = [c for c in courses
                    if term_filter.lower() in (c.get("term") or {}).get("name", "").lower()]
 
     week_courses = []
     warnings = []
+    read_issues = []
     for c in courses:
         cid = c["id"]
         name = c.get("name") or f"课程{cid}"
         code = c.get("course_code", "")
         term = (c.get("term") or {}).get("name", "")
+        read_status = {"assignments": {"state": "ok", "data_updated_at": now.isoformat(), "coverage": "all"}}
+
+        def optional(path, params, key, label, options=None):
+            try:
+                items = api_get_all(base, token, path, params, dict(options or {}, budget=budget))
+                read_status[key] = {"state": "ok", "data_updated_at": datetime.now(timezone.utc).isoformat(),
+                                    "coverage": getattr(items, "coverage", "all")}
+                return items
+            except RuntimeError as error:
+                kind = getattr(error, "kind", "request_failed")
+                read_status[key] = {"state": kind, "data_updated_at": None, "coverage": "unknown", "retained": False}
+                read_issues.append({"course_id": str(cid), "course_name": name, "section": key, "kind": kind,
+                                    "http_status": getattr(error, "http_status", None)})
+                warnings.append("%s：%s未能读取（%s）" % (name, label, READ_REASONS.get(kind, READ_REASONS["request_failed"])))
+                return getattr(error, "items", [])
 
         # ---- 作业 ----
         # 作业是快照对比的依据，读取失败时中止，不能当成全部被删除。
         assignments = api_get_all(base, token, f"/courses/{cid}/assignments",
-                                  {"order_by": "due_at", "include[]": ["submission"]})
+                                  {"order_by": "due_at", "include[]": ["submission"]}, {"budget": budget})
+        read_status["assignments"]["data_updated_at"] = datetime.now(timezone.utc).isoformat()
         new_assignments, upcoming, changes = [], [], []
         course_state = {}
         prev_course = prev_state.get("assignments", {}).get(str(cid), {})
         for a in assignments:
             created, updated, due = parse_ts(a.get("created_at")), parse_ts(a.get("updated_at")), parse_ts(a.get("due_at"))
-            sub = a.get("submission") or {}
+            sub = a.get("submission")
+            sub = sub if isinstance(sub, dict) else {}
             wf = sub.get("workflow_state")
-            submitted = wf in ("submitted", "graded", "pending_review")
-            graded = wf == "graded"
+            submission = submission_state(a)
+            graded = submission["graded"]
             is_new = bool(created and created >= lookback_start)
             is_updated = (not is_new) and bool(updated and updated >= lookback_start)
 
@@ -425,8 +634,9 @@ def fetch_week_data(cfg):
                 "points": a.get("points_possible"),
                 "url": a.get("html_url", ""),
                 "status": "新布置" if is_new else ("有更新" if is_updated else None),
-                "submitted": submitted,
+                "submitted": submission["submitted"],
                 "graded": graded,
+                "submission_status": submission["submission_status"],
                 "score": sub.get("score"),
             }
             if is_new or is_updated:
@@ -441,17 +651,13 @@ def fetch_week_data(cfg):
         new_state["assignments"][str(cid)] = course_state
 
         # ---- 新文件 ----
-        try:
-            files = api_get_all(base, token, f"/courses/{cid}/files",
-                                {"sort": "created_at", "order": "desc"})
-        except RuntimeError as e:
-            warnings.append("%s：课件未能读取（%s）" % (name, e))
-            files = []
+        files = optional(f"/courses/{cid}/files", {"sort": "created_at", "order": "desc"},
+                         "files", "课件", {"window_start": lookback_start})
         new_files = []
         files_page = f"{base}/courses/{cid}/files"
         for f_ in files:
             created, updated = parse_ts(f_.get("created_at")), parse_ts(f_.get("updated_at"))
-            if not (created and created >= lookback_start):
+            if not (created and lookback_start <= created <= now):
                 continue
             changed = bool(updated and (updated - created).total_seconds() > 3600)
             fname = f_.get("display_name") or f_.get("filename") or "未命名文件"
@@ -486,15 +692,12 @@ def fetch_week_data(cfg):
                     stats["failed"] += 1
 
         # ---- 公告 ----
-        try:
-            anns = api_get_all(base, token, f"/courses/{cid}/announcements", {})
-        except RuntimeError as e:
-            warnings.append("%s：公告未能读取（%s）" % (name, e))
-            anns = []
+        anns = optional("/announcements", {"context_codes[]": ["course_%s" % cid],
+                        "start_date": lookback_start.isoformat(), "end_date": now.isoformat()}, "announcements", "公告")
         new_anns = []
         for an in anns:
-            created = parse_ts(an.get("created_at")) or parse_ts(an.get("posted_at"))
-            if created and created >= lookback_start:
+            created = parse_ts(an.get("posted_at")) or parse_ts(an.get("created_at"))
+            if created and lookback_start <= created <= now:
                 new_anns.append({
                     "title": an.get("title", "无标题公告"),
                     "created_at": fmt_hk(created),
@@ -502,7 +705,8 @@ def fetch_week_data(cfg):
                     "url": an.get("html_url", ""),
                 })
 
-        week_courses.append({
+        course = {
+            "course_id": str(cid),
             "name": name,
             "code": code,
             "term": term,
@@ -512,7 +716,20 @@ def fetch_week_data(cfg):
             "new_files": new_files,
             "announcements": new_anns,
             "changes": changes,
-        })
+            "read_status": read_status,
+        }
+        for key, field in [("files", "new_files"), ("announcements", "announcements")]:
+            if read_status[key]["state"] == "ok":
+                continue
+            for old_week in previous_weeks:
+                old = next((x for x in old_week.get("courses", []) if str(x.get("course_id")) == str(cid) or x.get("url") == course["url"]), None)
+                state = old.get("read_status", {}).get(key) if old else None
+                if old and isinstance(old.get(field), list) and ((state.get("state") == "ok" or state.get("retained")) if state else bool(old[field])):
+                    course[field] = old[field]
+                    read_status[key]["retained"] = True
+                    read_status[key]["data_updated_at"] = (state or {}).get("data_updated_at") or old_week.get("generated_at") or "未知"
+                    break
+        week_courses.append(course)
 
     week = {
         "date": now.astimezone(HK_TZ).strftime("%Y-%m-%d"),
@@ -520,6 +737,9 @@ def fetch_week_data(cfg):
         "range": f"{lookback_start.astimezone(HK_TZ).strftime('%Y-%m-%d %H:%M')} ~ {now.astimezone(HK_TZ).strftime('%Y-%m-%d %H:%M')}",
         "courses": week_courses,
         "warnings": warnings,
+        "read_issues": read_issues,
+        "fetch_state": "partial" if read_issues else "complete",
+        "generated_at_iso": now.isoformat(),
     }
     return week, new_state, stats
 
@@ -528,6 +748,10 @@ def fetch_week_data(cfg):
 
 def sub_label(a):
     """作业提交状态的可读标签。"""
+    if a.get("submission_status") == "excused":
+        return "已豁免"
+    if a.get("submission_status") == "resubmit":
+        return "需重新提交"
     if a.get("graded"):
         score = a.get("score")
         return f"已评分 {score if score is not None else '-'}分"
@@ -535,7 +759,7 @@ def sub_label(a):
         return "已提交"
     if a.get("submitted") is False:
         return "**未提交**"
-    return "-"
+    return "状态待核验（请在 Canvas / 提交平台核对）"
 
 
 def render_markdown(week, token_warn=None, stats=None):
@@ -552,8 +776,8 @@ def render_markdown(week, token_warn=None, stats=None):
     ]
     n_new = sum(len(c["new_assignments"]) for c in week["courses"])
     n_up = sum(len(c["upcoming"]) for c in week["courses"])
-    n_files = sum(len(c["new_files"]) for c in week["courses"])
-    n_anns = sum(len(c["announcements"]) for c in week["courses"])
+    n_files = sum(len(c["new_files"]) for c in week["courses"] if c.get("read_status", {}).get("files", {}).get("state", "ok") == "ok")
+    n_anns = sum(len(c["announcements"]) for c in week["courses"] if c.get("read_status", {}).get("announcements", {}).get("state", "ok") == "ok")
     n_unsub = sum(1 for c in week["courses"] for a in c["upcoming"] + c["new_assignments"]
                   if a.get("submitted") is False and not a.get("graded"))
     n_changes = sum(len(c.get("changes") or []) for c in week["courses"])
@@ -564,10 +788,32 @@ def render_markdown(week, token_warn=None, stats=None):
         f"- 新公告：{n_anns} 条；与上次相比变化：{n_changes} 处",
         "",
     ]
-    for warning in week.get("warnings", []):
-        lines += ["> ⚠️ " + warning, ""]
+    if week.get("read_issues"):
+        lines += ["> ⚠️ 本次部分更新，作业已读取，以下内容未更新；旧数据与部分结果均已标记。", ""]
+        groups = {}
+        for issue in week["read_issues"]:
+            kind = issue["kind"] if issue["kind"] in READ_REASONS else "request_failed"
+            groups.setdefault(kind, []).append(issue)
+        for kind, issues in groups.items():
+            lines += ["<details><summary>%s · %s 项读取</summary>" % (READ_REASONS[kind], len(issues)), ""]
+            for issue in issues:
+                label = "课件" if issue["section"] == "files" else "公告"
+                lines.append("- %s：%s未能读取" % (strip_html(issue["course_name"]), label))
+            lines += ["", "</details>", ""]
+    elif week.get("warnings"):
+        lines += ["> ⚠️ 旧记录包含读取警告，旧错误正文不展示，请使用更新代码核对。", ""]
     def is_active(c):
-        return bool(c["new_assignments"] or c["upcoming"] or c["new_files"] or c["announcements"])
+        return bool(c["new_assignments"] or c["upcoming"] or c["new_files"] or c["announcements"] or
+                    any(s["state"] != "ok" for s in c.get("read_status", {}).values()))
+
+    def section_note(c, key):
+        state = c.get("read_status", {}).get(key, {"state": "ok"})
+        if state["state"] == "ok":
+            return "读取成功，近期统计窗口已完整覆盖。" if state.get("coverage") == "window" else "读取成功。"
+        text = READ_REASONS.get(state["state"], READ_REASONS["request_failed"])
+        if state.get("retained"):
+            return text + "；本次未更新，显示旧数据；上次成功读取：" + str(state.get("data_updated_at") or "未知")
+        return text + "；本次未完整读取，不能判定没有内容；如有条目仅为已读取部分。"
 
     for c in [x for x in week["courses"] if is_active(x) or x.get("changes")]:
         lines += [f"## {c['name']}（{c['code']}）", ""]
@@ -593,20 +839,22 @@ def render_markdown(week, token_warn=None, stats=None):
         else:
             lines.append("未来 7 天没有截止的任务。")
         lines += ["", "### 📂 本周新上传资料", ""]
+        lines += [section_note(c, "files"), ""]
         if c["new_files"]:
             lines += ["| 文件 | 类型 | 大小 | 上传时间 |", "|---|---|---|---|"]
             for f_ in c["new_files"]:
                 when = f_["updated_at"] if f_.get("is_update") else f_["created_at"]
                 mark = "（有更新）" if f_.get("is_update") else ""
                 lines.append(f"| [{f_['name']}]({f_['url']}) | {f_['kind']} | {f_['size_kb']} KB | {when}{mark} |")
-        else:
+        elif c.get("read_status", {}).get("files", {}).get("state", "ok") == "ok":
             lines.append("本周无新资料。")
         lines += ["", "### 📢 新公告", ""]
+        lines += [section_note(c, "announcements"), ""]
         if c["announcements"]:
             for an in c["announcements"]:
                 title = f"[{an['title']}]({an['url']})" if an.get("url") else f"**{an['title']}**"
                 lines.append(f"- {title}（{an['created_at']}）：{an['summary']}…")
-        else:
+        elif c.get("read_status", {}).get("announcements", {}).get("state", "ok") == "ok":
             lines.append("本周无新公告。")
         lines.append("")
 
@@ -665,6 +913,17 @@ def load_local_weeks():
         return data.get("weeks", []) if isinstance(data, dict) else []
     except (FileNotFoundError, json.JSONDecodeError):
         return []
+
+
+def load_previous_sections(cfg):
+    """只在同一学校的本机归档中寻找旧内容，不把不同学校混在当前结果里。"""
+    try:
+        data = json.loads(LOCAL_DATA.read_text(encoding="utf-8"))
+        if data.get("canvas_url", "").rstrip("/") == cfg["canvas_url"].rstrip("/"):
+            return data.get("weeks", [])
+    except (OSError, ValueError):
+        pass
+    return []
 
 
 def update_site(cfg, week):
@@ -755,8 +1014,8 @@ def run_once(cfg=None, quiet=False):
         result["error"] = str(e)
         return result
     result["week"] = week
+    result["refresh_state"] = week["fetch_state"]
     result["stats"] = stats
-    save_last_state(new_state)
 
     ics_path = BASE_DIR / "deadlines.ics"
     result["ics_count"] = build_ics(week, ics_path)
@@ -778,6 +1037,7 @@ def run_once(cfg=None, quiet=False):
         alias = BASE_DIR / "我的学习网站.html"
         shutil.copyfile(result["standalone"], alias)
         result["website"] = alias
+    save_last_state(new_state)
     result["ok"] = True
     return result
 
@@ -816,12 +1076,13 @@ def main():
     week, stats = res["week"], res["stats"]
     n_new = sum(len(c["new_assignments"]) for c in week["courses"])
     n_up = sum(len(c["upcoming"]) for c in week["courses"])
-    n_files = sum(len(c["new_files"]) for c in week["courses"])
-    n_anns = sum(len(c["announcements"]) for c in week["courses"])
+    n_files = sum(len(c["new_files"]) for c in week["courses"] if c.get("read_status", {}).get("files", {}).get("state", "ok") == "ok")
+    n_anns = sum(len(c["announcements"]) for c in week["courses"] if c.get("read_status", {}).get("announcements", {}).get("state", "ok") == "ok")
     n_unsub = sum(1 for c in week["courses"] for a in c["upcoming"] + c["new_assignments"]
                   if a.get("submitted") is False and not a.get("graded"))
     n_changes = sum(len(c.get("changes") or []) for c in week["courses"])
-    print(f"OK 课程数={len(week['courses'])} 新作业={n_new} 即将截止={n_up}（未提交 {n_unsub}） "
+    state_label = "PARTIAL_OK" if week["fetch_state"] == "partial" else "OK"
+    print(f"{state_label} 课程数={len(week['courses'])} 新作业={n_new} 即将截止={n_up}（未提交 {n_unsub}） "
           f"新资料={n_files} 新公告={n_anns} 变化={n_changes} "
           f"下载={stats['downloaded']}(跳过{stats['skipped']},失败{stats['failed']})/{stats['total']} 日历事件={res['ics_count']}")
     if res["token_warn"]:

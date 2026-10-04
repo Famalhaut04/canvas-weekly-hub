@@ -1,0 +1,5 @@
+Python3.8: 3 files compile OK
+git diff --check: PASS
+HEAD: b986178a55056b180875dfddccfc2dc692f38a97
+Staged files:
+Own temporary test directories: 0

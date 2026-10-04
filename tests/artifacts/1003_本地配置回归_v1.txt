@@ -1,0 +1,16 @@
+test_only_board_files_are_public_and_refresh_uses_local_data (__main__.BoardTests) ... ok
+test_check_config_is_offline_and_does_not_generate_reports (__main__.ConfigTests) ... ok
+test_example_is_local_by_default (__main__.ConfigTests) ... ok
+test_invalid_fields_have_readable_errors (__main__.ConfigTests) ... ok
+test_push_requires_real_repo (__main__.ConfigTests) ... ok
+test_validation_does_not_modify_input (__main__.ConfigTests) ... ok
+test_windows_bom_config (__main__.ConfigTests) ... ok
+test_assignment_failure_does_not_save_snapshot (__main__.FetchTests) ... ok
+test_invalid_list_is_rejected_but_file_metadata_still_works (__main__.FetchTests) ... ok
+test_paginated_list_cannot_silently_truncate (__main__.FetchTests) ... ok
+test_partial_failure_is_reported_in_markdown (__main__.FetchTests) ... ok
+
+----------------------------------------------------------------------
+Ran 11 tests in 0.733s
+
+OK

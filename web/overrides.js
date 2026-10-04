@@ -165,8 +165,10 @@ async function updateRefreshReminder() {
     if (revision !== reminderRevision) return;
     const p = reminderPrefs();
     const age = state.successAt === null ? null : Date.now() - state.successAt;
+    let partial = false;
+    try { const data = JSON.parse(HUB_STORE.get("hubData") || "null"); partial = !!(data && data.weeks && data.weeks[0] && data.weeks[0].fetch_state === "partial"); } catch (e) {}
     time.textContent = state.successAt === null ? "更新时间未知，可手动刷新" :
-      "上次成功更新：" + new Date(state.successAt).toLocaleString("zh-CN", { hour12: false }) + "（设备时区）";
+      (partial ? "上次作业成功更新：" : "上次成功更新：") + new Date(state.successAt).toLocaleString("zh-CN", { hour12: false }) + "（设备时区）";
     const label = document.getElementById("refresh-plan");
     if (label) label.textContent = p.enabled ? "每 " + p.days + " 天提醒 · 点击才刷新" : "更新提醒已关闭 · 可随时手动刷新";
     const signature = JSON.stringify([state.binding, state.successAt, p.days]);
@@ -226,46 +228,136 @@ function fmtLocal(d) {
 
 /* ---------------- Canvas 抓取（经学生自己的 Worker 转发） ---------------- */
 
-function workerApi(path, params, cfg) {
+class CanvasReadError extends Error {
+  constructor(kind, message, httpStatus, items) {
+    super(message); this.kind = kind; this.httpStatus = httpStatus || null; this.items = items || [];
+  }
+}
+const READ_REASONS = {
+  permission_denied: "Canvas 权限拒绝，该课程列表不可访问；请在学校课程页面核对权限，不必反复换令牌",
+  blocked: "收到 HTML 防护页，请检查学校的网络访问限制",
+  access_denied: "访问被拒绝，具体权限或访问限制原因尚未确认",
+  auth_failed: "认证失败，请核对令牌是否有效或已过期",
+  not_found: "接口返回 404，请先确认个人 Worker 已更新；若仍发生，核对学校接口支持",
+  service_error: "服务异常，请检查个人助手部署与学校服务状态",
+  rate_limited: "请求受限，请减少刷新频率后再试",
+  incomplete: "结果不完整，已停止分页；不能据此判断没有资料",
+  pagination_unavailable: "旧 Worker 未提供分页信息，请部署更新后的完整 worker.js",
+  request_failed: "请求失败，请检查网络与学校接口；未判定为令牌过期",
+  invalid_response: "响应格式不正确，请检查个人 Worker 与学校接口",
+};
+function readReason(kind) { return READ_REASONS[kind] || READ_REASONS.request_failed; }
+function refreshResultMessage(data) {
+  const w = data.weeks[0], cs = w.courses || [];
+  if (!w.read_issues || !w.read_issues.length) return "课程已更新并保存在本浏览器。";
+  const ok = key => cs.filter(c => c.read_status[key].state === "ok").length;
+  return "部分更新已保存：作业 " + cs.length + "/" + cs.length + " 门，文件 " + ok("files") + "/" + cs.length +
+    " 门，公告 " + ok("announcements") + "/" + cs.length + " 门。未更新项已标注，请查看看板中的分类说明。";
+}
+
+function workerApi(path, params, cfg, withMeta) {
   const c = validateHubCfg(cfg || hubCfg());
   const u = c.worker.replace(/\/+$/, "") + "/proxy/" + path.replace(/^\/+/, "");
-  const qs = new URLSearchParams(params || {});
+  const qs = typeof params === "string" ? params : new URLSearchParams(params || {}).toString();
   return requestText(u + "?" + qs, {
     headers: { "X-Canvas-Token": c.token, "X-Canvas-Host": hostOf(c.canvasUrl) },
   }).then(({ response: r, body }) => {
-    const clean = body.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-    const jsonMsg = (() => { try { const j = JSON.parse(body);
-      return (j.error || j.message || (j.errors && j.errors[0] && j.errors[0].message)) || ""; }
-      catch (e) { return ""; } })();
-    if (r.status === 401) throw new Error("令牌无效或已过期（HTTP 401）：请到 Canvas 重新生成");
+    const html = /text\/html/i.test(r.headers.get("Content-Type") || "") || /^\s*(?:<!doctype|<html)/i.test(body);
+    if (r.status === 401) throw new CanvasReadError("auth_failed", "令牌无效或已过期（HTTP 401）：请到 Canvas 核对", 401);
     if (r.status === 403) {
-      if (/cloudflare|just a moment|attention required|access denied|blocked|rate limit/i.test(body))
-        throw new Error("Canvas 拒绝访问（HTTP 403）：请求被学校/CDN 的防护拦截（疑似屏蔽云服务器访问）。" +
-          "请稍后重试；若反复出现，请把本条提示和你的小助手地址反馈给作者");
-      throw new Error("Canvas 拒绝访问（HTTP 403）：请检查账号的课程 / 接口权限及学校访问限制；" +
-        "这不等同于令牌过期。" + (jsonMsg ? "详情：" + jsonMsg : ""));
+      let permission = false;
+      try { permission = /not authorized|permission|insufficient privileges/i.test(JSON.stringify(JSON.parse(body))); } catch (e) {}
+      const kind = html ? (/cloudflare|cf-chl|just a moment|attention required/i.test(body) ? "blocked" : "access_denied") : permission ? "permission_denied" : "access_denied";
+      throw new CanvasReadError(kind, "Canvas 拒绝访问（HTTP 403）：" + readReason(kind), 403);
     }
-    if (r.status >= 500) throw new Error("查询服务返回 HTTP " + r.status +
-      "：请检查个人助手部署、学校接口和网络；此状态不能判断令牌是否过期。" +
-      (jsonMsg ? "详情：" + jsonMsg : "") + " @ " + path);
-    if (!r.ok) throw new Error("Canvas API HTTP " + r.status + (jsonMsg ? "：" + jsonMsg :
-      clean ? "：" + clean.slice(0, 140) : "") + " @ " + path);
-    try { return JSON.parse(body); }
-    catch (e) { throw new Error("小助手返回了非 JSON 数据，请检查是否部署了本项目代码"); }
+    if (!r.ok) {
+      const kind = r.status === 404 ? "not_found" : r.status === 429 ? "rate_limited" : r.status >= 500 ? "service_error" : "request_failed";
+      throw new CanvasReadError(kind, "查询服务返回 HTTP " + r.status + "：" + readReason(kind) + "；不能判断令牌是否过期", r.status);
+    }
+    if (html) {
+      const kind = /cloudflare|cf-chl|just a moment|attention required/i.test(body) ? "blocked" : "invalid_response";
+      throw new CanvasReadError(kind, readReason(kind), r.status);
+    }
+    let data;
+    try { data = JSON.parse(body); }
+    catch (e) { throw new CanvasReadError("invalid_response", readReason("invalid_response")); }
+    return withMeta ? { data, link: r.headers.get("Link"), known: r.headers.get("X-Canvas-Pagination") === "link" } : data;
   });
 }
 
-async function apiAll(path, params, cfg) {
-  let page = 1, out = [];
-  for (;;) {
-    const arr = await workerApi(path, Object.assign({}, params || {}, { per_page: 100, page: page }), cfg);
-    if (!Array.isArray(arr)) throw new Error("Canvas 列表格式异常，本次数据未保存：" + path);
-    out = out.concat(arr);
-    if (arr.length < 100) break;
-    if (page >= 20) throw new Error("数据达到分页上限，本次数据未保存：" + path);
-    page += 1;
+function nextLink(link) {
+  if (!link) return null;
+  const next = [];
+  for (const part of link.split(/,\s*(?=<)/)) {
+    const entry = part.match(/^\s*<([^<>]+)>\s*(;[^<>]*)?\s*$/);
+    const rel = entry && (entry[2] || "").match(/;\s*rel\s*=\s*(?:"([^"]+)"|([^,;\s]+))/i);
+    if (!entry || !rel) throw new CanvasReadError("incomplete", "分页 Link 格式异常，结果不完整");
+    if ((rel[1] || rel[2]).split(/\s+/).includes("next")) next.push(entry[1]);
   }
-  return out;
+  if (next.length > 1) throw new CanvasReadError("incomplete", "分页 Link 格式异常，结果不完整");
+  return next.length ? next[0] : null;
+}
+
+function safeNextPage(value, cfg, path, params) {
+  let u;
+  try { u = new URL(value); } catch (e) { throw new CanvasReadError("incomplete", "下一页地址无效，结果不完整"); }
+  if (u.protocol !== "https:" || u.origin !== cfg.canvasUrl.replace(/\/$/, "") || u.username || u.password || u.hash ||
+      u.pathname.replace(/\.json$/, "") !== "/api/v1/" + path ||
+      [...u.searchParams.keys()].some((k) => /^(?:access_token|token|authorization)$/i.test(k)))
+    throw new CanvasReadError("incomplete", "下一页地址未通过学校与接口校验，已停止请求");
+  const original = new URLSearchParams(params || {});
+  for (const key of ["context_codes[]", "start_date", "end_date", "sort", "order", "order_by", "include[]", "enrollment_state"]) {
+    if (original.has(key) && JSON.stringify(original.getAll(key).sort()) !== JSON.stringify(u.searchParams.getAll(key).sort()))
+      throw new CanvasReadError("incomplete", "分页改变了课程或统计范围，已停止请求");
+  }
+  return u;
+}
+
+async function apiAll(path, params, cfg, options) {
+  const c = validateHubCfg(cfg || hubCfg());
+  let query = new URLSearchParams(Object.assign({ per_page: 100 }, params || {}, { page: 1 })).toString();
+  const out = [], urls = new Set(), batches = new Set();
+  let ordered = true, previousTime = Infinity, missingTime = false;
+  for (let page = 1; page <= 20; page++) {
+    if (options && options.budget && --options.budget.remaining < 0)
+      throw new CanvasReadError("incomplete", "本次查询请求预算已用完，结果不完整", null, out);
+    const canonical = new URL("https://pagination.invalid/?" + query); canonical.searchParams.sort();
+    if (urls.has(canonical.search)) throw new CanvasReadError("incomplete", "分页循环，结果不完整", null, out);
+    urls.add(canonical.search);
+    let result;
+    try { result = await workerApi(path, query, c, true); }
+    catch (e) { e.items = out; throw e; }
+    const arr = result.data;
+    if (!Array.isArray(arr)) throw new CanvasReadError("invalid_response", "Canvas 列表格式异常，本次数据未保存");
+    if (arr.some(x => !x || typeof x !== "object" || Array.isArray(x)))
+      throw new CanvasReadError("invalid_response", "列表条目格式异常，本次数据未保存", null, out);
+    const signature = JSON.stringify(arr.map((x) => x && x.id !== undefined ? x.id : x));
+    if (arr.length && batches.has(signature)) throw new CanvasReadError("incomplete", "返回重复页，结果不完整", null, out);
+    batches.add(signature); out.push(...arr);
+    let windowCovered = false;
+    if (options && options.windowStart && params.sort === "created_at" && params.order === "desc") {
+      for (const item of arr) {
+        const stamp = parseTs(item.created_at);
+        if (!stamp || stamp.getTime() > previousTime) ordered = false;
+        if (!stamp) missingTime = true;
+        if (stamp) previousTime = stamp.getTime();
+      }
+      windowCovered = ordered && arr.length > 0 && previousTime < options.windowStart.getTime();
+    }
+    let next;
+    try {
+      next = nextLink(result.link);
+      if (next) next = safeNextPage(next, c, path, params);
+    } catch (e) { e.items = out; throw e; }
+    if (windowCovered || (!next && (result.known || result.link))) {
+      if (missingTime) throw new CanvasReadError("incomplete", "部分文件缺少有效创建时间，统计范围未能完整核对", null, out);
+      out.coverage = windowCovered ? "window" : "all";
+      return out;
+    }
+    if (!next) throw new CanvasReadError("pagination_unavailable", readReason("pagination_unavailable"), null, out);
+    if (page === 20) throw new CanvasReadError("incomplete", "已达到分页请求预算，结果不完整", null, out);
+    query = next.search.slice(1);
+  }
 }
 
 /* ---------------- 类型判断（与桌面引擎一致） ---------------- */
@@ -278,6 +370,29 @@ function assignKind(a) {
   if (t.includes("external_tool")) return "外部工具";
   if (t.includes("not_graded")) return "不计分";
   return "任务";
+}
+
+function submissionState(a) {
+  const sub = a.submission && typeof a.submission === "object" && !Array.isArray(a.submission) ? a.submission : {};
+  const wf = sub.workflow_state;
+  let submitted = null, graded = false, status = "unknown";
+  if (sub.excused === true) status = "excused";
+  else if (sub.redo_request === true) status = "resubmit";
+  else if (["submitted", "graded", "pending_review"].includes(wf)) {
+    submitted = true;
+    graded = wf === "graded" && sub.grade_matches_current_submission !== false;
+    status = graded ? "graded" : "submitted";
+  } else if (wf === "unsubmitted") {
+    const types = Array.isArray(a.submission_types) ? a.submission_types : [];
+    if (!sub.submitted_at && !["external_tool", "on_paper", "none"].some(t => types.includes(t))) {
+      submitted = false;
+      status = "unsubmitted";
+    }
+  } else if (!wf && parseTs(sub.submitted_at)) {
+    submitted = true;
+    status = "submitted";
+  }
+  return { submitted, graded, submission_status: status };
 }
 
 function fileKind(name) {
@@ -299,13 +414,20 @@ async function fetchAll(inputCfg, progress) {
   const binding = await refreshBinding(cfg);
   const beforeBinding = await refreshBinding(hubCfg());
   const report = progress || (() => {});
+  const budget = { remaining: 200 };
   report("正在读取课程列表…");
-  const courses = await apiAll("courses", { enrollment_state: "active", "include[]": "term" }, cfg);
+  const courses = await apiAll("courses", { enrollment_state: "active", "include[]": "term" }, cfg, { budget });
   const warnings = [];
+  const readIssues = [];
+  let previousData;
+  try { previousData = JSON.parse(HUB_STORE.get("hubData") || "null"); } catch (e) {}
+  const previousWeeks = previousData && previousData.canvas_url === cfg.canvasUrl && binding === beforeBinding
+    ? previousData.weeks || [] : [];
 
   let lastState = null;
   try { lastState = JSON.parse(HUB_STORE.get("hubLastState") || "null"); } catch (e) {}
-  const newState = { assignments: {} };
+  if (binding !== beforeBinding || (lastState && lastState.reader_binding && lastState.reader_binding !== binding)) lastState = null;
+  const newState = { assignments: {}, reader_binding: binding };
 
   const now = new Date();
   const lookbackStart = new Date(now.getTime() - 7 * 86400000);
@@ -318,15 +440,28 @@ async function fetchAll(inputCfg, progress) {
     const code = c.course_code || "";
     const term = (c.term || {}).name || "";
     report("正在抓取 " + (weekCourses.length + 1) + "/" + courses.length + "：" + name);
-    const optional = (path, params, label) => apiAll(path, params, cfg).catch((e) => {
-      warnings.push(name + "：" + label + "未能读取（" + e.message + "）");
-      return [];
-    });
+    const readStatus = { assignments: { state: "ok", data_updated_at: now.toISOString(), coverage: "all" } };
+    const optional = async (path, params, key, label, options) => {
+      try {
+        const items = await apiAll(path, params, cfg, Object.assign({ budget }, options || {}));
+        readStatus[key] = { state: "ok", data_updated_at: new Date().toISOString(), coverage: items.coverage || "all" };
+        return items;
+      } catch (e) {
+        const kind = e.kind || "request_failed";
+        readStatus[key] = { state: kind, data_updated_at: null, coverage: "unknown", retained: false };
+        const issue = { course_id: cid, course_name: name, section: key, kind, http_status: e.httpStatus || null };
+        readIssues.push(issue);
+        warnings.push(name + "：" + label + "未能读取（" + readReason(kind) + "）");
+        return Array.isArray(e.items) ? e.items : [];
+      }
+    };
     const [assignments, files, anns] = await Promise.all([
-      apiAll("courses/" + cid + "/assignments", { order_by: "due_at", "include[]": "submission" }, cfg),
-      optional("courses/" + cid + "/files", { sort: "created_at", order: "desc" }, "课件"),
-      optional("courses/" + cid + "/announcements", {}, "公告"),
+      apiAll("courses/" + cid + "/assignments", { order_by: "due_at", "include[]": "submission" }, cfg, { budget }),
+      optional("courses/" + cid + "/files", { sort: "created_at", order: "desc" }, "files", "课件", { windowStart: lookbackStart }),
+      optional("announcements", { "context_codes[]": "course_" + cid,
+        start_date: lookbackStart.toISOString(), end_date: now.toISOString() }, "announcements", "公告"),
     ]);
+    readStatus.assignments.data_updated_at = new Date().toISOString();
 
     const courseState = {};
     const prevCourse = (lastState && lastState.assignments && lastState.assignments[cid]) || {};
@@ -334,10 +469,10 @@ async function fetchAll(inputCfg, progress) {
     const newAssignments = [], upcoming = [];
 
     for (const a of assignments) {
-      const sub = a.submission || {};
+      const sub = a.submission && typeof a.submission === "object" && !Array.isArray(a.submission) ? a.submission : {};
       const wf = sub.workflow_state;
-      const submitted = ["submitted", "graded", "pending_review"].includes(wf);
-      const graded = wf === "graded";
+      const submission = submissionState(a);
+      const graded = submission.graded;
       const created = parseTs(a.created_at), updated = parseTs(a.updated_at), due = parseTs(a.due_at);
       const isNew = !!(created && created >= lookbackStart);
       const isUpdated = !isNew && !!(updated && updated >= lookbackStart);
@@ -362,7 +497,7 @@ async function fetchAll(inputCfg, progress) {
         due_iso: due ? due.toISOString() : null,
         points: a.points_possible, url: a.html_url || "",
         status: isNew ? "新布置" : (isUpdated ? "有更新" : null),
-        submitted: submitted, graded: graded, score: sub.score,
+        submitted: submission.submitted, graded: graded, submission_status: submission.submission_status, score: sub.score,
       };
       if (isNew || isUpdated) newAssignments.push(item);
       if (isDueSoon) upcoming.push(Object.assign({}, item));
@@ -378,7 +513,7 @@ async function fetchAll(inputCfg, progress) {
     const filesPage = cfg.canvasUrl.replace(/\/+$/, "") + "/courses/" + cid + "/files";
     for (const f of files) {
       const created = parseTs(f.created_at), updated = parseTs(f.updated_at);
-      if (!created || created < lookbackStart) continue;
+      if (!created || created < lookbackStart || created > now) continue;
       const fname = f.display_name || f.filename || "未命名文件";
       newFiles.push({
         name: fname, kind: fileKind(fname),
@@ -391,22 +526,37 @@ async function fetchAll(inputCfg, progress) {
 
     const newAnns = [];
     for (const an of anns) {
-      const created = parseTs(an.created_at) || parseTs(an.posted_at);
-      if (!created || created < lookbackStart) continue;
+      const created = parseTs(an.posted_at) || parseTs(an.created_at);
+      if (!created || created < lookbackStart || created > now) continue;
       newAnns.push({ title: an.title || "无标题公告", created_at: fmtLocal(created),
                      summary: stripTags(an.message || ""), url: an.html_url || "" });
     }
 
-    weekCourses.push({ name: name, code: code, term: term,
+    const course = { course_id: cid, name: name, code: code, term: term,
       url: cfg.canvasUrl.replace(/\/+$/, "") + "/courses/" + cid,
       new_assignments: newAssignments, upcoming: upcoming,
-      new_files: newFiles, announcements: newAnns, changes: changes });
+      new_files: newFiles, announcements: newAnns, changes: changes, read_status: readStatus };
+    for (const [key, field] of [["files", "new_files"], ["announcements", "announcements"]]) {
+      if (readStatus[key].state === "ok") continue;
+      for (const oldWeek of previousWeeks) {
+        const old = (oldWeek.courses || []).find((x) => String(x.course_id) === cid || x.url === course.url);
+        const state = old && old.read_status && old.read_status[key];
+        if (old && Array.isArray(old[field]) && (state ? state.state === "ok" || state.retained : old[field].length > 0)) {
+          course[field] = old[field];
+          readStatus[key].retained = true;
+          readStatus[key].data_updated_at = state && state.data_updated_at || oldWeek.generated_at || "未知";
+          break;
+        }
+      }
+    }
+    weekCourses.push(course);
   }
 
   const week = {
     date: fmtDate(now), generated_at: fmtLocal(now),
     range: fmtDate(new Date(now.getTime() - 7 * 86400000)) + " ~ " + fmtDate(now),
-    courses: weekCourses, warnings: warnings,
+    courses: weekCourses, warnings: warnings, read_issues: readIssues, generated_at_iso: now.toISOString(),
+    fetch_state: readIssues.length ? "partial" : "complete",
   };
 
   // 合并历史（最多 52 周）
@@ -439,11 +589,11 @@ function fmtPrev(iso) {
   return d && !isNaN(d) ? fmtLocal(d) : "无截止时间";
 }
 function stripTags(html) {
-  return String(html || "").replace(/<[^>]+>/g, " ").replace(/&[a-z]+;/gi, " ")
+  return String(html || "").replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, " ").replace(/<[^>]+>/g, " ").replace(/&[a-z]+;/gi, " ")
     .replace(/\s+/g, " ").trim().slice(0, 160);
 }
 function parseTs(s) {
-  if (!s) return null;
+  if (typeof s !== "string" || !/(?:Z|[+-]\d{2}:\d{2})$/i.test(s)) return null;
   const d = new Date(s);
   return isNaN(d.getTime()) ? null : d;
 }
@@ -754,12 +904,11 @@ python serve_board.py</pre>
         const me = await workerApi("users/self", {}, c);
         if (!me || !me.id) throw new Error("Canvas 认证失败，本次配置未保存");
         const data = await fetchAll(c, status);
-        status("✅ 完成：" + data.weeks[0].courses.length + " 门课程已生成看板", S_OK);
+        status(refreshResultMessage(data), data.weeks[0].warnings.length ? S_WARN : S_OK);
         boot(data);
         showFirstTip();
-        refreshNotice(data.weeks[0].warnings.length ? "看板已更新，部分内容未能读取，详见课程警告。" : "课程已更新并保存在本浏览器。");
-        if (!data.weeks[0].warnings.length) ov.style.display = "none";
-        else status("⚠️ 看板已生成，部分内容未能读取：\n" + data.weeks[0].warnings.join("\n"), S_WARN);
+        refreshNotice(refreshResultMessage(data));
+        ov.style.display = "none";
       });
     } catch (e) { status("❌ " + e.message, S_WARN); }
   };
@@ -995,8 +1144,7 @@ refreshBtn.onclick = async () => {
       const data = await fetchAll();
       boot(data);
       showFirstTip();
-      const warnings = data.weeks[0].warnings;
-      refreshNotice(warnings.length ? "看板已更新，部分内容未能读取：" + warnings.join("；") : "课程已更新并保存在本浏览器。");
+      refreshNotice(refreshResultMessage(data));
     });
   } catch (e) {
     refreshNotice("本次未更新：" + e.message + "。旧看板保留；可在设置中检查配置。");

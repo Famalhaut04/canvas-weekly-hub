@@ -68,7 +68,7 @@ function harness(seed = {}, route = async () => new Response("[]"), options = {}
     confirm: () => false, alert() {}, boot() {},
     $: (id) => nodes.get(id),
   });
-  vm.runInContext(SOURCE + "\nglobalThis.api = {normalizeOrigin, validateHubCfg, hubCfg, fetchAll, apiAll, showSetup, withHubTask, withCanvasTask, requestText, readSetup, buildBackup, validateBackup, reminderPrefs, refreshBinding, currentRefreshState, legacyRefreshTime, updateRefreshReminder, saveSetup};", context);
+  vm.runInContext(SOURCE + "\nglobalThis.api = {normalizeOrigin, validateHubCfg, hubCfg, fetchAll, apiAll, workerApi, nextLink, safeNextPage, submissionState, showSetup, withHubTask, withCanvasTask, requestText, readSetup, buildBackup, validateBackup, reminderPrefs, refreshBinding, currentRefreshState, legacyRefreshTime, updateRefreshReminder, saveSetup};", context);
   const form = (c = cfg) => {
     context.api.showSetup();
     for (const [id, field] of Object.entries({ "s-worker": "worker", "s-canvas": "canvasUrl",
@@ -77,7 +77,9 @@ function harness(seed = {}, route = async () => new Response("[]"), options = {}
   return { context, api: context.api, values, nodes, storage, timers, calls, form, events };
 }
 
-function response(data, status = 200) { return new Response(JSON.stringify(data), { status }); }
+function response(data, status = 200, headers = {}) {
+  return new Response(JSON.stringify(data), { status, headers: { "X-Canvas-Pagination": "link", "Content-Type": "application/json", ...headers } });
+}
 function saved(c = cfg) {
   return { hubWorker: c.worker, hubCanvasUrl: c.canvasUrl, hubToken: c.token,
     hubExpires: c.expires, hubSendKey: c.sendkey };
@@ -100,6 +102,49 @@ async function reminderHarness(age, options = {}) {
   await h.api.updateRefreshReminder();
   return { ...h, time };
 }
+
+test("提交状态共享夹具：未知、矛盾、外部平台不误报未提交", () => {
+  const h = harness();
+  const cases = JSON.parse(fs.readFileSync(path.join(ROOT, "tests/fixtures/1004_提交状态夹具_v1.json"), "utf8"));
+  for (const c of cases) {
+    const actual = JSON.parse(JSON.stringify(h.api.submissionState(c.assignment)));
+    assert.deepEqual(actual, { submitted: c.submitted, graded: c.graded, submission_status: c.submission_status }, c.name);
+  }
+});
+
+test("提交状态标签：未知明确待核验；旧记录仍兼容；特殊状态不被评分覆盖", () => {
+  const h = harness(), html = fs.readFileSync(path.join(ROOT, "site-template/index.html"), "utf8");
+  const helpers = html.slice(html.indexOf("const esc"), html.indexOf("const HK"));
+  const chip = html.slice(html.indexOf("const subChip"), html.indexOf("function assignRow"));
+  vm.runInContext(helpers + chip + "\nglobalThis.submissionUI = subChip;", h.context);
+  assert.match(h.context.submissionUI({ submitted: null }), /状态待核验/);
+  assert.ok(!h.context.submissionUI({ submitted: null }).includes(">未提交<"));
+  assert.match(h.context.submissionUI({ submitted: false }), />未提交</);
+  assert.match(h.context.submissionUI({ submitted: true }), />已提交</);
+  assert.match(h.context.submissionUI({ graded: true, score: '<script>unsafe</script>' }), /&lt;script&gt;/);
+  assert.match(h.context.submissionUI({ submission_status: "excused", graded: true }), /已豁免/);
+  assert.match(h.context.submissionUI({ submission_status: "resubmit", graded: true }), /需重新提交/);
+});
+
+test("同日主动刷新获取最新提交状态，历史记录不被补造状态", async () => {
+  const time = clock(); let submission;
+  const h = harness(saved(), async url => {
+    if (url.includes("/proxy/courses?")) return response([{ id: 1, name: "Fixture Course" }]);
+    if (url.includes("/assignments?")) {
+      assert.equal(new URL(url).searchParams.get("include[]"), "submission");
+      return response([{ id: 2, name: "Fixture Assignment", created_at: new time.Date().toISOString(),
+        due_at: new time.Date(time.now() + 86400000).toISOString(), submission }]);
+    }
+    return response([]);
+  }, { Date: time.Date });
+  const first = await h.api.fetchAll(cfg);
+  assert.equal(first.weeks[0].courses[0].upcoming[0].submitted, null);
+  submission = { workflow_state: "submitted", submitted_at: "2026-10-02T04:00:00Z" };
+  const latest = await h.api.fetchAll(cfg);
+  assert.equal(latest.weeks.length, 1);
+  assert.equal(latest.weeks[0].courses[0].upcoming[0].submitted, true);
+  assert.equal(first.weeks[0].courses[0].upcoming[0].submitted, null);
+});
 
 test("72 小时边界只提示，不自动查询；时间按设备时区显示", async () => {
   for (const age of [72 * 3600000 - 1, 72 * 3600000, 72 * 3600000 + 1]) {
@@ -253,7 +298,7 @@ test("可选内容失败保存可用结果，成功时间与警告均保留", as
   await h.nodes.get("reminder-refresh").onclick();
   assert.equal(JSON.parse(h.values.get("hubRefreshState")).successAt, h.time.now());
   assert.equal(JSON.parse(h.values.get("hubData")).weeks[0].warnings.length, 1);
-  assert.match(h.nodes.get("refresh-message").textContent, /部分内容未能读取.*课件/);
+  assert.match(h.nodes.get("refresh-message").textContent, /部分更新已保存.*文件 0\/1/);
 });
 
 test("更换令牌或学校后不沿用旧身份更新时间，仅检查不制造成功时间", async () => {
@@ -363,7 +408,8 @@ test("Issue #4 分页夹具：第二页作业进入快照和待办", async () =>
     created_at: "2020-01-01T00:00:00Z", due_at: null }));
   const h = harness(saved(), async (url) => {
     if (url.includes("/proxy/courses?")) return response([{ id: 1, name: "Fixture Course" }]);
-    if (url.includes("/assignments?")) return response(new URL(url).searchParams.get("page") === "1" ? old : [{
+    if (url.includes("/assignments?")) return new URL(url).searchParams.get("page") === "1"
+      ? response(old, 200, { Link: '<https://canvas.example/api/v1/courses/1/assignments?per_page=100&page=2&order_by=due_at&include%5B%5D=submission>; rel="next"' }) : response([{
       id: 100, name: "Fixture Page Two", created_at: "2020-01-01T00:00:00Z",
       due_at: new Date(time.now() + 86400000).toISOString(), html_url: "https://canvas.example/assignments/100" }]);
     return response([]);
@@ -553,8 +599,12 @@ test("关闭再打开设置会恢复已保存配置", () => {
 test("列表格式错误与分页上限不会返回不完整数据", async () => {
   const invalid = harness({}, async () => response({ error: "unexpected shape" }));
   await assert.rejects(invalid.api.apiAll("courses", {}, cfg), /列表格式异常/);
-  const capped = harness({}, async () => response(Array.from({ length: 100 }, (_, id) => ({ id }))));
-  await assert.rejects(capped.api.apiAll("courses", {}, cfg), /分页上限/);
+  const capped = harness({}, async (url) => {
+    const page = Number(new URL(url).searchParams.get("page"));
+    return response(Array.from({ length: 100 }, (_, id) => ({ id: page * 100 + id })), 200,
+      { Link: '<https://canvas.example/api/v1/courses?per_page=100&page=' + (page + 1) + '>; rel="next"' });
+  });
+  await assert.rejects(capped.api.apiAll("courses", {}, cfg), /分页请求预算/);
 });
 
 test("Worker 根路由报告版本与 KV 能力", async () => {
@@ -693,4 +743,197 @@ test("看板转义导入文本并阻止脚本链接", () => {
     assert.equal(c.helper.safeHref(url), "#");
   assert.equal(c.helper.safeHref("downloads/file.pdf"), "downloads/file.pdf");
   assert.equal(c.helper.esc("<img src=x onerror=alert(1)>"), "&lt;img src=x onerror=alert(1)&gt;");
+});
+
+function issue5Route(url) {
+  if (url.includes("/proxy/courses?")) return response([{ id: 1, name: "Fixture A" }, { id: 2, name: "Fixture B" }]);
+  if (url.includes("/assignments?")) return response([]);
+  if (url.includes("/courses/1/files?")) return response({ message: "user not authorized to perform that action" }, 403);
+  if (url.includes("/proxy/announcements?") && new URL(url).searchParams.get("context_codes[]") === "course_1")
+    return new Response('<html><script>window.secret="fixture-token";</script>404</html>', { status: 404, headers: { "Content-Type": "text/html" } });
+  return response([]);
+}
+
+test("#5 公告逐课使用全局接口与精确统计窗口，失败不牵连其他课程", async () => {
+  const time = clock(), h = harness(saved(), issue5Route, { Date: time.Date });
+  const data = await h.api.fetchAll(cfg), w = data.weeks[0];
+  const calls = h.calls.filter(c => c.url.includes("/proxy/announcements?"));
+  assert.equal(calls.length, 2);
+  for (const [index, call] of calls.entries()) {
+    const query = new URL(call.url).searchParams;
+    assert.equal(query.get("context_codes[]"), "course_" + (index + 1));
+    assert.equal(query.get("start_date"), new Date(time.now() - 7 * 86400000).toISOString());
+    assert.equal(query.get("end_date"), new Date(time.now()).toISOString());
+  }
+  assert.equal(w.fetch_state, "partial"); assert.equal(w.read_issues.length, 2);
+  assert.equal(w.courses[0].read_status.files.state, "permission_denied");
+  assert.equal(w.courses[0].read_status.announcements.state, "not_found");
+  assert.equal(w.courses[1].read_status.files.state, "ok");
+  assert.equal(w.courses[1].read_status.announcements.state, "ok");
+  assert.ok(!JSON.stringify(w.warnings).includes("window.secret"));
+  assert.ok(!JSON.stringify(w).includes(cfg.token));
+});
+
+test("#5 公告按 posted_at 入窗口，避免旧创建 / 延迟发布时间误筛", async () => {
+  const time = clock(), h = harness(saved(), async (url) => {
+    if (url.includes("/proxy/courses?")) return response([{ id: 1, name: "Fixture" }]);
+    if (url.includes("/proxy/announcements?")) return response([{ id: 3, title: "Posted Recently", created_at: "2020-01-01T00:00:00Z",
+      posted_at: new Date(time.now() - 86400000).toISOString(), message: '<script>fixture_script</script><p>safe text</p>' }]);
+    return response([]);
+  }, { Date: time.Date });
+  const w = (await h.api.fetchAll(cfg)).weeks[0];
+  assert.equal(w.courses[0].announcements[0].title, "Posted Recently");
+  assert.equal(w.courses[0].announcements[0].summary, "safe text");
+});
+
+test("#5 Link 决定分页：短页仍有 next；满页无 next 正常结束", async () => {
+  const h = harness({}, async (url) => {
+    const page = Number(new URL(url).searchParams.get("page"));
+    return page === 1 ? response([{ id: 1 }], 200, { Link: '<https://canvas.example/api/v1/courses?page=2&opaque=abc>; rel="next"' }) :
+      response(Array.from({ length: 100 }, (_, id) => ({ id: id + 2 })));
+  });
+  assert.equal((await h.api.apiAll("courses", {}, cfg)).length, 101);
+  assert.equal(h.calls.length, 2); assert.ok(h.calls[1].url.includes("opaque=abc"));
+});
+
+test("#5 重复地址和重复页都会停止，不把循环当完整结果", async () => {
+  for (const repeatedBody of [false, true]) {
+    const h = harness({}, async (url) => {
+      const page = Number(new URL(url).searchParams.get("page"));
+      return response([{ id: repeatedBody ? 1 : page }], 200,
+        { Link: '<https://canvas.example/api/v1/courses?page=' + (repeatedBody ? page + 1 : 1) + '>; rel="next"' });
+    });
+    await assert.rejects(h.api.apiAll("courses", {}, cfg), e => e.kind === "incomplete");
+    assert.ok(h.calls.length <= 2);
+  }
+});
+
+test("#5 不跟随异站、HTTP、不同接口、凭证或课程 / 范围变化的 Link", async () => {
+  for (const next of ["https://evil.example/api/v1/announcements", "http://canvas.example/api/v1/announcements",
+    "https://canvas.example/api/v1/users/self", "https://user:pass@canvas.example/api/v1/announcements",
+    "https://canvas.example/api/v1/announcements?access_token=fixture-token", "https://canvas.example/api/v1/announcements?context_codes[]=course_2",
+    "https://canvas.example/api/v1/announcements?context_codes[]=course_1&start_date=2020-01-01"] ) {
+    const h = harness({}, async () => response([{ id: 1 }], 200, { Link: '<' + next + '>; rel="next"' }));
+    await assert.rejects(h.api.apiAll("announcements", { "context_codes[]": "course_1", start_date: "2026-10-01" }, cfg), e => e.kind === "incomplete");
+    assert.equal(h.calls.length, 1);
+  }
+});
+
+test("#5 文件窗口完整覆盖可提前停止；顺序不可靠时继续；预算满则不完整", async () => {
+  const boundary = new Date("2026-09-25T00:00:00Z");
+  const params = { sort: "created_at", order: "desc" };
+  const next = '<https://canvas.example/api/v1/courses/1/files?sort=created_at&order=desc&page=2>; rel="next"';
+  const complete = harness({}, async () => response([{ id: 1, created_at: "2026-09-26T00:00:00Z" },
+    { id: 2, created_at: "2026-09-24T00:00:00Z" }], 200, { Link: next }));
+  const items = await complete.api.apiAll("courses/1/files", params, cfg, { windowStart: boundary });
+  assert.equal(items.coverage, "window"); assert.equal(complete.calls.length, 1);
+  const unsorted = harness({}, async (url) => new URL(url).searchParams.get("page") === "1" ? response([
+    { id: 2, created_at: "2026-09-24T00:00:00Z" }, { id: 1, created_at: "2026-09-26T00:00:00Z" }], 200, { Link: next }) : response([]));
+  assert.equal((await unsorted.api.apiAll("courses/1/files", params, cfg, { windowStart: boundary })).coverage, "all");
+  assert.equal(unsorted.calls.length, 2);
+  const capped = harness({}, async () => response([{ id: 1, created_at: "2026-09-26T00:00:00Z" }], 200, { Link: next }));
+  await assert.rejects(capped.api.apiAll("courses/1/files", params, cfg, { windowStart: boundary, budget: { remaining: 1 } }), e => e.kind === "incomplete");
+});
+
+test("#5 403 分类依据响应，404 / 防护 / 权限提示都不包含上游正文", async () => {
+  for (const [status, body, contentType, kind] of [
+    [403, '{"message":"user not authorized to perform that action","token":"fixture-token"}', "application/json", "permission_denied"],
+    [403, '<html>Just a Moment<script>fixture-token</script></html>', "text/html", "blocked"],
+    [403, '<html><script>fixture-token</script>Forbidden</html>', "text/html", "access_denied"],
+    [401, '{"token":"fixture-token"}', "application/json", "auth_failed"],
+    [200, '<html>Just a Moment<script>fixture-token</script></html>', "text/html", "blocked"],
+    [404, '<html><script>fixture-token</script>window.unsafe</html>', "text/html", "not_found"]]) {
+    const h = harness({}, async () => new Response(body, { status, headers: { "Content-Type": contentType } }));
+    await assert.rejects(h.api.workerApi("courses/1/files", {}, cfg), e => {
+      assert.equal(e.kind, kind); assert.ok(!e.message.includes("fixture-token"));
+      assert.ok(!e.message.includes("<") && !e.message.includes("window.unsafe")); return true;
+    });
+    assert.equal(h.calls.length, 1);
+  }
+});
+
+test("#5 同日失败保留先前内容并标注时间，后续成功空列表才清除", async () => {
+  const time = clock(), h = harness(saved(), issue5Route, { Date: time.Date });
+  const old = { course_id: "1", name: "Fixture A", url: cfg.canvasUrl + "/courses/1", new_files: [{ name: "Old File" }],
+    announcements: [{ title: "Old Announcement" }], new_assignments: [], upcoming: [], changes: [],
+    read_status: { files: { state: "ok", data_updated_at: "2026-10-02T01:00:00Z" }, announcements: { state: "ok", data_updated_at: "2026-10-02T01:00:00Z" } } };
+  h.values.set("hubData", JSON.stringify({ canvas_url: cfg.canvasUrl, weeks: [{ date: "2026-10-02", courses: [old] }] }));
+  const data = await h.api.fetchAll(cfg), c = data.weeks[0].courses[0];
+  assert.equal(data.weeks.length, 1); assert.equal(c.new_files[0].name, "Old File");
+  assert.equal(c.announcements[0].title, "Old Announcement");
+  assert.equal(c.read_status.files.retained, true); assert.equal(c.read_status.files.data_updated_at, "2026-10-02T01:00:00Z");
+  h.context.fetch = async (url) => url.includes("/proxy/courses?") ? response([{ id: 1, name: "Fixture A" }]) : response([]);
+  const next = (await h.api.fetchAll(cfg)).weeks[0].courses[0];
+  assert.equal(next.new_files.length, 0); assert.equal(next.read_status.files.state, "ok");
+});
+
+test("#5 HTML 渲染：失败空列表与成功空列表不同，旧警告正文隐藏", async () => {
+  const h = harness(saved(), issue5Route), data = await h.api.fetchAll(cfg);
+  const html = fs.readFileSync(path.join(ROOT, "site-template/index.html"), "utf8");
+  const helpers = html.slice(html.indexOf("const esc"), html.indexOf("const HK"));
+  const notes = html.slice(html.indexOf("const READ_LABELS"), html.indexOf("function courseCard("));
+  vm.runInContext(helpers + notes + '\nglobalThis.readUI = {readNote, warningHtml};', h.context);
+  const failed = h.context.readUI.readNote(data.weeks[0].courses[0], "files");
+  const success = h.context.readUI.readNote(data.weeks[0].courses[1], "files");
+  assert.match(failed, /权限拒绝.*不能判定没有内容/); assert.match(success, /读取成功/);
+  const grouped = h.context.readUI.warningHtml(data.weeks[0]);
+  assert.match(grouped, /文件成功 1\/2/); assert.match(grouped, /<details/); assert.match(grouped, /Fixture A/);
+  assert.ok(!grouped.includes("fixture-token") && !grouped.includes("window.secret"));
+  assert.ok(!h.context.readUI.warningHtml({ warnings: ['<script>fixture-token</script>'] }).includes("fixture-token"));
+});
+
+test("#5 Worker 转发全局公告及 Link，暴露分页头，拒绝旧公告路径与 URL 凭证", async () => {
+  const worker = await fixtureWorker(), original = global.fetch, calls = [];
+  global.fetch = async (url, options) => {
+    calls.push({ url: String(url), options });
+    return response([], 200, { Link: '<https://canvas.example/api/v1/announcements?context_codes[]=course_1&page=2>; rel="next"' });
+  };
+  const req = path => new Request('https://fixture.example/proxy/' + path, { headers: {
+    "X-Canvas-Host": "canvas.example", "X-Canvas-Token": "fixture-token" } });
+  try {
+    const r = await worker.fetch(req('announcements?context_codes[]=course_1&start_date=2026-09-25&end_date=2026-10-02'), {});
+    assert.equal(r.status, 200); assert.match(r.headers.get("Link"), /rel="next"/);
+    assert.match(r.headers.get("Access-Control-Expose-Headers"), /Link.*X-Canvas-Pagination/);
+    assert.equal(r.headers.get("X-Canvas-Pagination"), "link");
+    assert.equal(new URL(calls[0].url).pathname, '/api/v1/announcements');
+    assert.equal(new URL(calls[0].url).searchParams.get("context_codes[]"), "course_1");
+    for (const path of ['courses/1/announcements', 'announcements', 'announcements?context_codes[]=account_1',
+      'announcements?context_codes[]=course_1&context_codes[]=course_2', 'courses?access_token=fixture-token'])
+      assert.equal((await worker.fetch(req(path), {})).status, 400);
+    assert.equal(calls.length, 1);
+  } finally { global.fetch = original; }
+});
+
+test("#5 旧 Worker 空页、短页、满页缺少分页信息时都不能伪造完整结果", async () => {
+  for (const count of [0, 1, 100]) {
+    const h = harness({}, async () => response(Array.from({ length: count }, (_, id) => ({ id })), 200, { "X-Canvas-Pagination": "" }));
+    await assert.rejects(h.api.apiAll("courses", {}, cfg), e => e.kind === "pagination_unavailable");
+    assert.equal(h.calls.length, 1);
+  }
+});
+
+test("#5 Link 属性顺序可变，歧义或损坏的 Link 不当成末页", () => {
+  const h = harness({});
+  assert.equal(h.api.nextLink('<https://canvas.example/api/v1/courses?page=2>; title="page"; rel="next", <https://canvas.example/api/v1/courses?page=1>; rel="first"'), 'https://canvas.example/api/v1/courses?page=2');
+  for (const link of ['not-a-link', '<https://canvas.example/api/v1/courses>; title="page"', '<https://canvas.example/api/v1/courses>; rel="next", <https://canvas.example/api/v1/courses>; rel="next"'])
+    assert.throws(() => h.api.nextLink(link), e => e.kind === "incomplete");
+});
+
+test("#5 无效条目或无时区 / 缺失文件日期不能宣称窗口完整", async () => {
+  const badList = harness({}, async () => response([null]));
+  await assert.rejects(badList.api.apiAll("courses", {}, cfg), e => e.kind === "invalid_response");
+  for (const stamp of [null, '2026-09-24T00:00:00', 123]) {
+    const h = harness({}, async () => response([{ id: 1, created_at: stamp }]));
+    await assert.rejects(h.api.apiAll("courses/1/files", {sort: "created_at", order: "desc"}, cfg,
+      {windowStart: new Date('2026-09-25T00:00:00Z')}), e => e.kind === "incomplete");
+  }
+});
+
+test("#5 后续分页请求失败保留已读取条目，仍标记失败而非完整", async () => {
+  const h = harness({}, async (url) => new URL(url).searchParams.get("page") === "1" ? response([{id: 1}], 200,
+    {Link: '<https://canvas.example/api/v1/courses/1/files?page=2>; rel="next"'}) : response({message: "fixture-token"}, 503));
+  await assert.rejects(h.api.apiAll("courses/1/files", {}, cfg), e => {
+    assert.equal(e.kind, "service_error"); assert.equal(e.items.length, 1); assert.equal(e.items[0].id, 1);
+    assert.ok(!e.message.includes("fixture-token")); return true;
+  });
 });
