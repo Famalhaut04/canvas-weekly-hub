@@ -1,0 +1,66 @@
+{
+  "verified_at": "2026-10-04T21:16:08.441775+08:00",
+  "commit": "1ae1830694297e9485fb0cd7cd5f9abb586c7842",
+  "main": "1ae1830694297e9485fb0cd7cd5f9abb586c7842",
+  "tag": "e30ce1879d5b4c9b07c2628839573a618a46fe43",
+  "release": "https://github.com/Famalhaut04/canvas-weekly-hub/releases/tag/v2.2",
+  "assets": {
+    "worker.js": {
+      "bytes": 166231,
+      "sha256": "8349ad4a5babc31a56f4cf052a821401288d67e5de027a0cf6fdf6399ce039de",
+      "url": "https://github.com/Famalhaut04/canvas-weekly-hub/releases/download/v2.2/worker.js"
+    },
+    "canvas-weekly-hub-v2.2-source.zip": {
+      "bytes": 9155808,
+      "sha256": "b021e8431c09892f30b7725460a526c4a82856eb3c617d5f28f9ecb73e1d366f",
+      "url": "https://github.com/Famalhaut04/canvas-weekly-hub/releases/download/v2.2/canvas-weekly-hub-v2.2-source.zip"
+    }
+  },
+  "pages": {
+    "web/index.html": {
+      "sha256_lf": "04140b747c4ee692c044dc9d825bc06b594f8f6e4f1b749eb17bb4738628b403",
+      "url": "https://famalhaut04.github.io/canvas-weekly-hub/web/index.html"
+    },
+    "web/overview.html": {
+      "sha256_lf": "b3d264e3421ff8fbf7cbd351836680280f6f06f35852cefc83a4d6c95d688fc3",
+      "url": "https://famalhaut04.github.io/canvas-weekly-hub/web/overview.html"
+    },
+    "worker.js": {
+      "sha256_lf": "8349ad4a5babc31a56f4cf052a821401288d67e5de027a0cf6fdf6399ce039de",
+      "url": "https://famalhaut04.github.io/canvas-weekly-hub/worker.js"
+    }
+  },
+  "archive_entries": 178,
+  "pages_build": {
+    "url": "https://api.github.com/repos/Famalhaut04/canvas-weekly-hub/pages/builds/1259484267",
+    "status": "built",
+    "error": {
+      "message": null
+    },
+    "pusher": {
+      "login": "Famalhaut04",
+      "id": 118148765,
+      "node_id": "U_kgDOBwrOnQ",
+      "avatar_url": "https://avatars.githubusercontent.com/u/118148765?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/Famalhaut04",
+      "html_url": "https://github.com/Famalhaut04",
+      "followers_url": "https://api.github.com/users/Famalhaut04/followers",
+      "following_url": "https://api.github.com/users/Famalhaut04/following{/other_user}",
+      "gists_url": "https://api.github.com/users/Famalhaut04/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/Famalhaut04/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/Famalhaut04/subscriptions",
+      "organizations_url": "https://api.github.com/users/Famalhaut04/orgs",
+      "repos_url": "https://api.github.com/users/Famalhaut04/repos",
+      "events_url": "https://api.github.com/users/Famalhaut04/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/Famalhaut04/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "commit": "1ae1830694297e9485fb0cd7cd5f9abb586c7842",
+    "duration": 22969,
+    "created_at": "2026-10-04T13:15:16Z",
+    "updated_at": "2026-10-04T13:15:38Z"
+  }
+}
